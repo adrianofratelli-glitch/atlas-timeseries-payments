@@ -291,3 +291,7 @@ Measured results are tracked in [`queries/benchmarks.md`](queries/benchmarks.md)
 re-measured instead of copied forward when the cluster or workload changes.
 
 The previous electricity-metering version remains available in the `v1-energia` tag.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
