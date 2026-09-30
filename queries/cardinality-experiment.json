@@ -1,0 +1,48 @@
+{
+  "measured_at": "2026-09-01T16:00:20.791562+00:00",
+  "events": 400000,
+  "accounts": 2000000,
+  "conta_alvo": "C000867534",
+  "provedor_alvo": "PSP-000",
+  "runs": 15,
+  "rows": [
+    {
+      "modelagem": "conta_id como campo + \u00edndice",
+      "colecao": "card_campo",
+      "eventos": 400000,
+      "buckets": 19127,
+      "storage_mb": 11.94,
+      "index_mb": 3.59,
+      "bytes_por_evento": 29.84,
+      "ingestao_por_s": 9143,
+      "indice_s": 0.5,
+      "velocity_ms": {
+        "p50": 517.0,
+        "p95": 530.8
+      },
+      "p99_provedor_ms": {
+        "p50": 427.2,
+        "p95": 433.8
+      }
+    },
+    {
+      "modelagem": "conta_id dentro do metaField",
+      "colecao": "card_meta",
+      "eventos": 400000,
+      "buckets": 399924,
+      "storage_mb": 34.11,
+      "index_mb": 98.38,
+      "bytes_por_evento": 85.27,
+      "ingestao_por_s": 1255,
+      "indice_s": 0.0,
+      "velocity_ms": {
+        "p50": 618.2,
+        "p95": 954.0
+      },
+      "p99_provedor_ms": {
+        "p50": 731.0,
+        "p95": 870.2
+      }
+    }
+  ]
+}

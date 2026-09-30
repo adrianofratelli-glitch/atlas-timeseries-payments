@@ -1,0 +1,122 @@
+{
+  "measured_at": "2026-09-01T14:38:55.831123+00:00",
+  "events": 400000,
+  "provedor": "PSP-000",
+  "runs": 15,
+  "rows": [
+    {
+      "variante": "flat",
+      "eventos_por_bucket": 400000.0,
+      "eventos": 400000,
+      "buckets": null,
+      "storage_mb": 21.17,
+      "index_mb": 19.44,
+      "bytes_por_evento": 52.92,
+      "ingestao_por_s": 28091,
+      "latencia_ms": {
+        "p50": 2397.5,
+        "p95": 2652.3
+      },
+      "saude_ms": {
+        "p50": 75.2,
+        "p95": 100.6
+      },
+      "ratio_vs_flat": 1.0
+    },
+    {
+      "variante": "seconds",
+      "eventos_por_bucket": 16.9,
+      "eventos": 400000,
+      "buckets": 23630,
+      "storage_mb": 9.65,
+      "index_mb": 3.76,
+      "bytes_por_evento": 24.13,
+      "ingestao_por_s": 6593,
+      "latencia_ms": {
+        "p50": 1680.2,
+        "p95": 1854.4
+      },
+      "saude_ms": {
+        "p50": 32.2,
+        "p95": 61.7
+      },
+      "ratio_vs_flat": 2.19
+    },
+    {
+      "variante": "minutes",
+      "eventos_por_bucket": 20.6,
+      "eventos": 400000,
+      "buckets": 19447,
+      "storage_mb": 13.66,
+      "index_mb": 3.91,
+      "bytes_por_evento": 34.16,
+      "ingestao_por_s": 6211,
+      "latencia_ms": {
+        "p50": 1259.5,
+        "p95": 1451.5
+      },
+      "saude_ms": {
+        "p50": 24.1,
+        "p95": 39.9
+      },
+      "ratio_vs_flat": 1.55
+    },
+    {
+      "variante": "span1h",
+      "eventos_por_bucket": 15.7,
+      "eventos": 400000,
+      "buckets": 25551,
+      "storage_mb": 10.72,
+      "index_mb": 3.65,
+      "bytes_por_evento": 26.81,
+      "ingestao_por_s": 5332,
+      "latencia_ms": {
+        "p50": 1376.4,
+        "p95": 1571.3
+      },
+      "saude_ms": {
+        "p50": 32.7,
+        "p95": 65.5
+      },
+      "ratio_vs_flat": 1.97
+    },
+    {
+      "variante": "span1d",
+      "eventos_por_bucket": 20.6,
+      "eventos": 400000,
+      "buckets": 19447,
+      "storage_mb": 13.2,
+      "index_mb": 3.54,
+      "bytes_por_evento": 33.0,
+      "ingestao_por_s": 6302,
+      "latencia_ms": {
+        "p50": 1290.1,
+        "p95": 1366.7
+      },
+      "saude_ms": {
+        "p50": 19.2,
+        "p95": 27.7
+      },
+      "ratio_vs_flat": 1.6
+    },
+    {
+      "variante": "span1d_ordenado",
+      "eventos_por_bucket": 20.6,
+      "eventos": 400000,
+      "buckets": 19445,
+      "storage_mb": 4.36,
+      "index_mb": 1.31,
+      "bytes_por_evento": 10.9,
+      "ingestao_por_s": 12308,
+      "latencia_ms": {
+        "p50": 1246.4,
+        "p95": 1454.4
+      },
+      "saude_ms": {
+        "p50": 20.7,
+        "p95": 39.4
+      },
+      "ratio_vs_flat": 4.86
+    }
+  ]
+}

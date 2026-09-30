@@ -1,0 +1,79 @@
+{
+  "measured_at": "2026-09-01T17:17:00.108658+00:00",
+  "database": "trilho_pagamentos",
+  "events": 44733964,
+  "days": 7,
+  "accounts": 2000000,
+  "providers": 44,
+  "runs": 20,
+  "network_floor_ms": {
+    "p50": 17.2,
+    "p95": 24.3,
+    "min": 10.4,
+    "max": 25.2
+  },
+  "cases": {
+    "latencia_pix_1h": {
+      "p50": 302.2,
+      "p95": 314.4,
+      "min": 292.2,
+      "max": 315.1
+    },
+    "latencia_pix_24h": {
+      "p50": 6489.0,
+      "p95": 6954.3,
+      "min": 6132.6,
+      "max": 7386.6
+    },
+    "latencia_provedor_24h": {
+      "p50": 904.4,
+      "p95": 993.5,
+      "min": 871.1,
+      "max": 1066.6
+    },
+    "latencia_provedor_24h_preenchida": {
+      "p50": 944.5,
+      "p95": 1047.2,
+      "min": 865.4,
+      "max": 1133.3
+    },
+    "latencia_canal_7d_sem_provedor": {
+      "timeout": true,
+      "max_time_ms": 15000
+    },
+    "latencia_provedor_7d": {
+      "p50": 8605.6,
+      "p95": 11073.7,
+      "min": 6208.7,
+      "max": 11580.3
+    },
+    "saude_provedor_24h": {
+      "p50": 1043.3,
+      "p95": 1376.7,
+      "min": 931.4,
+      "max": 1776.8
+    },
+    "saude_provedor_7d": {
+      "p50": 7545.0,
+      "p95": 11061.2,
+      "min": 6168.8,
+      "max": 11565.9
+    },
+    "ranking_24h": {
+      "timeout": true,
+      "max_time_ms": 15000
+    },
+    "velocity_conta": {
+      "p50": 28.9,
+      "p95": 35.7,
+      "min": 24.7,
+      "max": 36.2
+    }
+  },
+  "storage": {
+    "storage_bytes": 905048064,
+    "index_bytes": 370245632,
+    "bytes_per_event": 20.23,
+    "buckets": 2613925
+  }
+}

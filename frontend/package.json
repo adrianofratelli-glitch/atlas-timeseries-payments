@@ -1,0 +1,25 @@
+{
+  "name": "atlas-timeseries-payments-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@leafygreen-ui/badge": "^10.2.4",
+    "@leafygreen-ui/banner": "^10.2.5",
+    "@leafygreen-ui/button": "^25.2.1",
+    "@leafygreen-ui/leafygreen-provider": "^5.0.4",
+    "@leafygreen-ui/toggle": "^12.1.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "uplot": "^1.6.31"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.2.2"
+  }
+}
