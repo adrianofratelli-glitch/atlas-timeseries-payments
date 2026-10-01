@@ -1,11 +1,16 @@
 """Evidência mínima da coleção time series que recebe a ingestão ao vivo."""
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 
+from pymongo.errors import OperationFailure
+
 from ..config import MAX_POINTS, MAX_TIME_MS
 from .client import db, with_retry
+
+log = logging.getLogger(__name__)
 
 COLLECTION = "payment_events_live"
 _OPTIONS_CACHE: tuple[float, dict] = (0.0, {})
@@ -50,21 +55,13 @@ def _bucket_snapshot(last_document: dict | None) -> dict | None:
         return None
 
     bucket_collection = db()[f"system.buckets.{COLLECTION}"]
-    bucket = with_retry(lambda: bucket_collection.find_one(
-        {
-            **{f"meta.{key}": value for key, value in meta.items()},
-            "control.min.ts": {"$lte": timestamp},
-            "control.max.ts": {"$gte": timestamp},
-        },
-        {
-            "_id": 1,
-            "meta": 1,
-            "control.version": 1,
-            "control.count": 1,
-            "control.min.ts": 1,
-            "control.max.ts": 1,
-        },
-    ))
+    try:
+        bucket = _find_bucket(bucket_collection, meta, timestamp)
+    except OperationFailure as exc:
+        # MongoDB recente bloqueia leitura direta de system.buckets.*; a prova
+        # física do bucket fica indisponível, mas o restante do painel segue vivo.
+        log.warning("snapshot do bucket indisponível: %s", exc.details.get("errmsg", exc) if exc.details else exc)
+        return None
     if not bucket:
         return None
 
@@ -80,6 +77,24 @@ def _bucket_snapshot(last_document: dict | None) -> dict | None:
         "compressed": isinstance(version, int) and version >= 2,
         "source": f"system.buckets.{COLLECTION}",
     }
+
+
+def _find_bucket(bucket_collection, meta: dict, timestamp) -> dict | None:
+    return with_retry(lambda: bucket_collection.find_one(
+        {
+            **{f"meta.{key}": value for key, value in meta.items()},
+            "control.min.ts": {"$lte": timestamp},
+            "control.max.ts": {"$gte": timestamp},
+        },
+        {
+            "_id": 1,
+            "meta": 1,
+            "control.version": 1,
+            "control.count": 1,
+            "control.min.ts": 1,
+            "control.max.ts": 1,
+        },
+    ))
 
 
 def overview(session_started_at: datetime | None = None,
