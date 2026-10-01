@@ -8,11 +8,11 @@ import 'uplot/dist/uPlot.min.css'
 
 const CORES = {
   p50: '#00ed64',
-  p95: '#0498ec',
-  p99: '#ffc010',
+  p95: '#3d9dff',
+  p99: '#ffad00',
   recusa: '#ff6960',
-  base: '#889397',
-  reconstruido: '#ffc010',
+  base: '#9ea2a1',
+  reconstruido: '#ffad00',
 }
 
 function fmt(ts) {
@@ -115,12 +115,12 @@ export default function Chart({ mode, points, minHeight = 240, onHover }) {
         })),
       ],
       axes: [
-        { stroke: '#889397', grid: { stroke: 'rgba(61,79,88,0.5)' }, ticks: { stroke: '#3d4f58' } },
-        { scale: 'y', stroke: '#889397', grid: { stroke: 'rgba(61,79,88,0.35)' },
-          ticks: { stroke: '#3d4f58' } },
+        { stroke: '#9ea2a1', grid: { stroke: 'rgba(61,79,88,0.5)' }, ticks: { stroke: '#2a424d' } },
+        { scale: 'y', stroke: '#9ea2a1', grid: { stroke: 'rgba(61,79,88,0.35)' },
+          ticks: { stroke: '#2a424d' } },
         ...(spec.throughputAxis ? [{
           scale: 'throughput', side: 1, stroke: CORES.p95,
-          grid: { show: false }, ticks: { stroke: '#3d4f58' },
+          grid: { show: false }, ticks: { stroke: '#2a424d' },
         }] : []),
       ],
       // Leitura do instante sob o cursor: a legenda fica no rodapé e o apresentador
