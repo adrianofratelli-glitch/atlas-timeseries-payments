@@ -60,6 +60,12 @@ def main() -> int:
 
     print("saúde")
     status, health = call("/health")
+    banco = str(health.get("database", ""))
+    if not banco.endswith("_test") and os.getenv("ALLOW_DEMO_DB_WRITE") != "1":
+        # Abre incidentes, liga a ingestão e chama /api/demo/reset: não roda contra a
+        # demo por acidente. Suba a API com MONGODB_DB=<banco>_test.
+        print(f"recusado: a API aponta para '{banco}', não para um banco *_test")
+        return 2
     check("health responde 200", status == 200, str(status))
     check("banco reporta eventos", health.get("events", 0) > 0, str(health.get("events")))
     check("change stream ativo", health.get("change_stream") == "ativo",
