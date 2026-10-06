@@ -40,6 +40,8 @@ def medir(fn, runs: int) -> dict:
         # Consulta que não cabe no teto é um resultado, não um crash: o teto existe
         # para a tela não travar, e o número que interessa é "não completa".
         return {"timeout": True, "max_time_ms": int(os.getenv("TS_MAX_TIME_MS", "15000"))}
+    except ValueError as exc:  # RangeError: a API recusa antes de consultar
+        return {"refused": True, "reason": str(exc)}
     amostras = []
     for _ in range(runs):
         t0 = time.perf_counter()
@@ -52,9 +54,15 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", type=int, default=20)
     ap.add_argument("--db", default=None)
+    ap.add_argument("--out", default=None,
+                    help="arquivo de saída (padrão: o JSON versionado em bench-results.json)")
     args = ap.parse_args()
 
-    os.environ.setdefault("MONGODB_DB", args.db or os.getenv("MONGODB_DB", "trilho_pagamentos"))
+    # `common` já carregou o .env; setdefault deixava --db sem efeito nos módulos do
+    # backend e o bench media o banco da demo dizendo medir outro.
+    if args.db:
+        os.environ["MONGODB_DB"] = args.db
+    os.environ.setdefault("MONGODB_DB", "trilho_pagamentos")
     from app.db import latency, providers, velocity  # noqa: E402
 
     d = common.db(args.db)
@@ -107,7 +115,7 @@ def main() -> None:
         "buckets": (st.get("timeseries") or {}).get("bucketCount"),
     }
 
-    saida = os.path.join(ROOT, "queries", "bench-results.json")
+    saida = args.out or os.path.join(ROOT, "queries", "bench-results.json")
     with open(saida, "w") as fh:
         json.dump(resultados, fh, indent=2)
 
@@ -119,6 +127,8 @@ def main() -> None:
     for nome, v in resultados["cases"].items():
         if v.get("timeout"):
             print(f'{nome:34} {"excedeu " + str(v["max_time_ms"]) + " ms":>27}')
+        elif v.get("refused"):
+            print(f'{nome:34} {"recusada pela API (teto de janela)":>40}')
         else:
             print(f'{nome:34} {v["p50"]:8.1f}ms {v["p95"]:8.1f}ms {v["p50"] - piso:14.1f}ms')
     print(f'\narmazenamento: {resultados["storage"]["bytes_per_event"]} B/evento, '

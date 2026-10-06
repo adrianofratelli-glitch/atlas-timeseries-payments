@@ -95,6 +95,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max", type=int, default=64)
     ap.add_argument("--seconds", type=float, default=12)
+    ap.add_argument("--out", default=None,
+                    help="arquivo de saída (padrão: o JSON versionado em stress-results.json)")
     args = ap.parse_args()
 
     with urllib.request.urlopen(BASE + "/api/scenarios", timeout=30) as res:
@@ -114,7 +116,7 @@ def main() -> int:
               f'status {r["status"]}', flush=True)
         n *= 2
 
-    out = os.path.join(ROOT, "tests", "stress-results.json")
+    out = args.out or os.path.join(ROOT, "tests", "stress-results.json")
     with open(out, "w") as fh:
         json.dump(resultados, fh, indent=2)
 
