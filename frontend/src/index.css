@@ -380,7 +380,8 @@ body {
   .topbar { min-height: 66px; height: auto; padding-block: 10px; align-items: flex-start; }
   .brand { flex-wrap: wrap; gap: 4px 9px; }
   .brand > span:last-child { flex-basis: 100%; white-space: normal; padding-left: 21px; }
-  .connection-state { font-size: 0; padding-top: 5px; }
+  /* Texto continua visível: só o ponto colorido faria da cor o único sinal. */
+  .connection-state { font-size: 11px; padding-top: 5px; }
   .proof-heading { align-items: stretch; flex-direction: column; gap: 16px; }
   .proof-heading h1 { font-size: 34px; }
   .play-action { width: 100%; }
