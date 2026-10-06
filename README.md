@@ -32,10 +32,13 @@ The stage operating point was measured on the shared M20 at **2,281 confirmed ev
 for a full 60-second window, with the aggregation running concurrently.
 
 Immediately below the live metrics, a compact evidence strip connects the physical
-mechanism to its measured result on the same schema. It is explicitly labelled as a
-historical benchmark—not as output from the short live run:
+mechanism to its measured result on the same schema. It reads `$collStats` from the
+connected database (`payment_events` against the plain `payment_events_flat` sample, per
+event) and says when it was measured. Until that answer arrives it shows the historical
+full-scale benchmark, labelled as such. Neither is output from the short live run:
 
 ```text
+historical benchmark (44.7 M events):
 44.7 M measurements → 2.61 M buckets · 17.1 measurements/bucket
 2.26× less data/event · 3.73× less total storage/event including indexes
 ```
@@ -48,8 +51,9 @@ the right-hand side.
 
 ![Physical time series bucket showing the route metadata, compression version, time range and measurement count](docs/screenshots/09-bucket-fisico.png)
 
-The bucket evidence is read from `system.buckets.payment_events_live` and exposes only
-its header:
+The bucket evidence is read with `find(..., rawData: true)` on `payment_events_live` —
+MongoDB 8.2+ no longer allows reading `system.buckets.*` directly, and older servers fall
+back to that namespace. Only the bucket header is projected:
 
 - `meta`: the identity of the series;
 - `control.min.ts` and `control.max.ts`: the time range currently stored;
@@ -168,6 +172,14 @@ the measured cardinality experiment, that alternative created 399,924 buckets fo
 All figures below were measured against the same shared Atlas M20 used by the demo. They
 are evidence for this environment, not a production sizing recommendation.
 
+A reduced-scale re-measurement on 2026-10-06 (2.4 M events in a `*_test` database)
+reproduced the mechanism with its own numbers — 2.08× less data and 2.29× less total
+storage per event, 16.0 measurements per bucket, ~15–17 k events/s bulk load — and is
+recorded, with query p50/p95, in [`queries/benchmarks.md`](queries/benchmarks.md). On the
+stage, the "Resultado da bucketização" strip shows the `$collStats` ratio of the
+connected database itself, and falls back to the historical benchmark below only until
+that measurement arrives.
+
 ### Live stage capacity
 
 | Workload | Confirmed rate | Batch p95 | Concurrent aggregation p95 | Result |
@@ -250,32 +262,64 @@ backend/venv/bin/pip install -r backend/requirements.txt
 (cd frontend && npm install)
 ```
 
-Generate the synthetic historical dataset and start the application:
+### Seed / reset (one command)
+
+`scripts/reset_demo.py` recreates **everything** the demo reads, in one idempotent run:
+providers and planted scenarios, the `payment_events` time series
+(`bucketMaxSpanSeconds=86400`), a one-day `payment_events_flat` sample for the storage
+comparison, the demo accounts used by the velocity query, the runtime state
+(`incidents`, `incident_alerts`, `payment_events_live` — recreated with its 1 h TTL on
+the next Play), leftover experiment collections and every index.
+
+It refuses any database whose name does not end in `_test` unless
+`ALLOW_DEMO_DB_WRITE=1` is set, because it drops and reloads tens of millions of events.
 
 ```bash
-bash data-generator/run_all.sh
-./start.sh
+# safe default: reduced scale in a *_test database (~2.4 M events, ~4 min on an M20)
+.venv/bin/python scripts/reset_demo.py --db trilho_pagamentos_test --days 3 --eps 10
+
+# the demo database at full scale (7 days at 75 events/s, ~45 M events)
+ALLOW_DEMO_DB_WRITE=1 .venv/bin/python scripts/reset_demo.py
+
+# an interrupted load (network drop, Ctrl+C) resumes from a per-day checkpoint:
+# confirmed days are skipped, the partial day is deleted and rewritten — no duplicates
+ALLOW_DEMO_DB_WRITE=1 .venv/bin/python scripts/reset_demo.py --resume
+```
+
+`bash data-generator/run_all.sh` is kept as a shortcut and forwards its arguments to the
+same script. `--days` must be at least 3 so the planted scenarios and the detector
+baseline fit in the dataset.
+
+### Start
+
+```bash
+./start.sh                                        # demo database from .env
+MONGODB_DB=trilho_pagamentos_test ./start.sh      # same app against the test database
 ```
 
 - API: `http://127.0.0.1:8400`
 - UI: `http://127.0.0.1:5400`
 
-For a smaller local dataset:
-
-```bash
-DAYS=2 EVENTS_PER_SECOND=40 bash data-generator/run_all.sh
-```
-
 ## Verification
 
-```bash
-python3 -m compileall -q backend tests
-(cd frontend && npm run build)
+Everything that writes runs against a `*_test` database. Start the API with
+`MONGODB_DB=trilho_pagamentos_test ./start.sh` first.
 
-.venv/bin/python tests/test_resilience.py
-.venv/bin/python tests/stress.py
-.venv/bin/python queries/bench.py --runs 20
+```bash
+python3 -m compileall -q backend tests scripts data-generator queries
+(cd frontend && npm run build && node --test tests/*.test.mjs)
+backend/venv/bin/python -m unittest tests/test_cors.py tests/test_client_concurrency.py
+
+# adversarial suites: hostile API input, and hostile ingestion straight into the cluster
+.venv/bin/python -m unittest discover -s tests/adversarial -p "test_*_adversarial.py" -v
+
+.venv/bin/python tests/test_resilience.py          # refuses a non-*_test API
+.venv/bin/python tests/stress.py --out /tmp/stress.json
+.venv/bin/python queries/bench.py --runs 20 --db trilho_pagamentos_test --out /tmp/bench.json
 ```
+
+`--out` keeps the versioned full-scale results in `queries/` and `tests/` untouched when
+measuring a reduced-scale database.
 
 With the application already running, reproduce the bounded live-capacity ramp:
 
@@ -289,8 +333,6 @@ expires its data.
 
 Measured results are tracked in [`queries/benchmarks.md`](queries/benchmarks.md) and are
 re-measured instead of copied forward when the cluster or workload changes.
-
-The previous electricity-metering version remains available in the `v1-energia` tag.
 
 ## License
 

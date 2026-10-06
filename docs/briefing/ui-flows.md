@@ -25,8 +25,8 @@ palco (arquivada — ver seção final).
 │                                                                        │
 │ eventos nesta execução │ throughput │ confirmação do lote │ agregação │
 │                                                                        │
-│ Resultado da bucketização (benchmark medido, não ao vivo)             │
-│ 44,7 M medições → 2,61 M buckets │ 2,26× menos dados │ 3,73× total    │
+│ Resultado da bucketização ($collStats deste cluster; antes, benchmark) │
+│ N medições → B buckets │ X× menos dados │ Y× total com índices        │
 │                                                                        │
 │ Eventos persistidos por segundo ── curva cresce por 60 s              │
 │ ▸ Ver query / chamada executada                                       │
@@ -99,7 +99,9 @@ Nota fixa no rodapé do rail (`integrity-note`, `App.jsx:392-396`): "o movimento
 representa apenas lotes confirmados... são números desta execução, não um
 benchmark de capacidade." Nenhum número na tela é hard-coded como resultado de
 sucesso — bucket e config de coleção vêm de `listCollections` e de
-`system.buckets.payment_events_live` ao vivo (ver `queries.md`).
+`find(rawData: true)` em `payment_events_live` ao vivo (ver `queries.md`). A faixa
+"Resultado da bucketização" usa `$collStats` do cluster conectado (`GET /api/storage`)
+assim que a medição chega; até lá mostra o benchmark histórico, rotulado como tal.
 
 ### Fallback de API anterior
 
