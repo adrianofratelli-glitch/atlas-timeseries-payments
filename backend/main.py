@@ -27,7 +27,7 @@ from app.services.alerts import hub
 from app.services.live import feed
 
 app = FastAPI(title="Telemetria do trilho de pagamentos · MongoDB Atlas time series",
-              version="1.0.0")
+              version="1.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=[
     f"http://127.0.0.1:{os.getenv('FRONTEND_PORT', '5400')}",
     f"http://localhost:{os.getenv('FRONTEND_PORT', '5400')}",
@@ -146,17 +146,17 @@ def list_scenarios():
 # -------------------------------------------------------------------- telemetria
 @app.get("/api/latency")
 def latency_series(canal: str | None = None, provedor: str | None = None,
-                   hours: float = Query(24.0, gt=0), fill: bool = False):
+                   hours: float = Query(24.0, gt=0, allow_inf_nan=False), fill: bool = False):
     return _timed(lambda: latency.serie(canal, provedor, hours, fill), "interativo")
 
 
 @app.get("/api/providers/{provedor_id}/health")
-def provider_health(provedor_id: str, hours: float = Query(24.0, gt=0)):
+def provider_health(provedor_id: str, hours: float = Query(24.0, gt=0, allow_inf_nan=False)):
     return _timed(lambda: providers.saude(provedor_id, hours), "analitico")
 
 
 @app.get("/api/ranking")
-def provider_ranking(hours: float = Query(1.0, gt=0),
+def provider_ranking(hours: float = Query(1.0, gt=0, allow_inf_nan=False),
                      limit: int = Query(40, ge=1, le=100)):
     return _timed(lambda: providers.ranking(hours, limit), "analitico")
 
@@ -184,6 +184,8 @@ class AbrirIncidente(BaseModel):
     eventos: int = Field(ge=0)
     aberto_por: str = Field(default="demo", max_length=64)
     nota: str | None = Field(default=None, max_length=500)
+
+    model_config = {"extra": "forbid", "allow_inf_nan": False}
 
 
 @app.post("/api/incidents")
@@ -224,7 +226,7 @@ def reset():
 
 # ---------------------------------------------------------------------- ao vivo
 class LiveStart(BaseModel):
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "forbid", "allow_inf_nan": False}
 
     # Ritmo do trilho completo. Canal não entra aqui: PIX, cartão e TED são
     # dimensões dos eventos produzidos pelo mesmo processo. O campo opcional existe
@@ -236,7 +238,9 @@ class LiveStart(BaseModel):
 
 
 class LiveDegrade(BaseModel):
-    provedor_id: str | None = None
+    model_config = {"extra": "forbid", "allow_inf_nan": False}
+
+    provedor_id: str | None = Field(default=None, min_length=3, max_length=64)
     fator_recusa: float = Field(default=6.0, ge=1, le=200)
     fator_latencia: float = Field(default=3.5, ge=1, le=200)
 
@@ -316,5 +320,6 @@ def alert_stream():
 
 @app.get("/api/alerts")
 def list_alerts(limit: int = Query(50, ge=1, le=200)):
-    rows = list(db().incident_alerts.find({}, {"_id": 0}).sort("at", -1).limit(limit))
+    rows = list(db().incident_alerts.find({}, {"_id": 0}, max_time_ms=config.MAX_TIME_MS)
+                .sort("at", -1).limit(limit))
     return {"alerts": json.loads(json.dumps(rows, default=_json))}

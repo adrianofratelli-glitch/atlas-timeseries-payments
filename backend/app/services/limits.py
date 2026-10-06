@@ -1,7 +1,8 @@
 """Concorrência limitada por classe de consulta, e o excesso é recusado.
 
-O balanço de trinta dias e a curva de um medidor não podem dividir a mesma fila: sob
-saturação, uma consulta analítica atrasa o caminho interativo e a demo trava na tela.
+A saúde de um provedor sobre 24 h e a série de latência de uma janela curta não podem
+dividir a mesma fila: sob saturação, uma consulta analítica atrasa o caminho
+interativo e a demo trava na tela.
 Quem não consegue vaga em `ACQUIRE_TIMEOUT` recebe 429 com Retry-After — sistema
 honesto sob carga recusa cedo.
 """
@@ -15,8 +16,8 @@ from fastapi import HTTPException
 ACQUIRE_TIMEOUT = 0.75
 
 _SLOTS = {
-    "interativo": threading.BoundedSemaphore(12),   # curva, cadastro
-    "analitico": threading.BoundedSemaphore(3),     # balanço do transformador
+    "interativo": threading.BoundedSemaphore(12),   # latência, velocity, cadastro
+    "analitico": threading.BoundedSemaphore(3),     # saúde do provedor, ranking, overview ao vivo
     "storage": threading.BoundedSemaphore(2),       # $collStats
 }
 

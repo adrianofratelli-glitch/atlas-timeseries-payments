@@ -101,7 +101,7 @@ the write order matters at high fan-out. This workload is the second case.
 
 ## Consequences
 
-- The numbers go into `queries/benchmarks.md` and `docs/briefing/02-mongodb.md`. A
+- The numbers go into `queries/benchmarks.md` and `docs/briefing/queries.md`. A
   customer asking "why that span" gets this table, not a preference.
 - The plain collection ingests **4.5× faster** (28 091/s against 6 302/s unsorted, 2.3×
   against sorted). Time series trades write throughput for storage and query shape, and
@@ -109,3 +109,38 @@ the write order matters at high fan-out. This workload is the second case.
   `LIMITATIONS.md`.
 - Re-run `queries/bucket_experiment.py` if the route cardinality or the event rate
   changes materially. Both move every row.
+
+## Re-measurement — 2026-10-06
+
+Same script, run against a reduced test database on the same shared M20 (MongoDB
+9.0.3), **200 000 events** (half the original sample), 10 runs per query, nothing else
+writing to the cluster. Network floor from the measuring host: ~205 ms p50, so the query
+columns are dominated by round trip and only comparable with each other.
+
+| Variant | Buckets | ev/bucket | B/event | Ratio vs plain | Ingest |
+|---|---:|---:|---:|---:|---:|
+| plain collection | — | — | 55.48 | 1.0× | 11 476/s |
+| `granularity: "seconds"` | 11 291 | 17.7 | 35.08 | 1.58× | 5 173/s |
+| `granularity: "minutes"` | 10 501 | 19.0 | 41.53 | 1.34× | 5 584/s |
+| `bucketMaxSpanSeconds: 3600` | 11 716 | 17.1 | 23.82 | 2.33× | 6 503/s |
+| `bucketMaxSpanSeconds: 86400` | 10 501 | 19.0 | 24.80 | 2.24× | 6 233/s |
+| **86400, written series-contiguous** | 10 501 | 19.0 | **19.48** | **2.85×** | **11 095/s** |
+
+What held and what did not:
+
+- **The write-order effect holds in direction, not in size.** Contiguous writing is
+  again the densest and fastest time series variant (1.27× less storage and 1.78× the
+  ingest of the same collection written in generation order), but the 3× storage gap of
+  the original 400 k run did not reproduce at 200 k.
+- **The unsorted variants are noisy.** An earlier run the same afternoon, with the live
+  feed accidentally writing to the same cluster, put `seconds` at 21.42 B/event and
+  `span1d` at 29.33; the series-contiguous row stayed at 19.23. `storageSize` read
+  immediately after a load depends on when WiredTiger checkpoints, so only the ordered
+  row is stable enough to quote across runs.
+- **The plain collection still ingests faster than any time series variant written in
+  generation order** (11 476/s against 5 173–6 503/s), consistent with the original
+  trade-off. Written series-contiguous, the time series collection roughly matches it.
+
+The decision (span 86400, writer grouping by route) is unchanged. Quote the full-scale
+storage numbers from `queries/benchmarks.md`, and this table as the reproducible
+small-scale check.

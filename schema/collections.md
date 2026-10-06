@@ -1,7 +1,7 @@
 # Modelling
 
 Why the documents look the way they do. The operational detail — indexes, pipelines,
-seeds — is in [`../docs/briefing/02-mongodb.md`](../docs/briefing/02-mongodb.md).
+seeds — is in [`../docs/briefing/queries.md`](../docs/briefing/queries.md).
 
 ## The split: event, route, opinion
 

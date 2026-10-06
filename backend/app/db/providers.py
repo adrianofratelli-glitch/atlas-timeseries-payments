@@ -270,6 +270,9 @@ def saude_ao_vivo(provedor: str) -> dict:
 
 def ranking(hours: float, limite: int = 40) -> dict:
     """Placar dos provedores na janela: volume, recusa e p99 lado a lado."""
+    # O teto é aplicado, mas nunca em silêncio: o payload diz o que foi pedido e o
+    # que foi usado, para a tela não apresentar 6 h como se fossem 24 h.
+    pedido = hours
     hours = min(hours, RANKING_MAX_HOURS)
     start, end, _, _ = resolve(hours)
     pipe = [
@@ -301,4 +304,5 @@ def ranking(hours: float, limite: int = 40) -> dict:
             if linha.get(campo) is not None:
                 linha[campo] = round(linha[campo], 2)
     return {"from": start, "to": end, "hours": hours,
-            "max_hours": RANKING_MAX_HOURS, "providers": linhas, "pipeline": pipe}
+            "hours_requested": pedido, "hours_applied": hours,
+            "clamped": pedido > hours, "max_hours": RANKING_MAX_HOURS, "providers": linhas, "pipeline": pipe}

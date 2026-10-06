@@ -37,8 +37,9 @@ function documentoVisivel(documento) {
 
 const PACOTES = Array.from({ length: 11 }, (_, index) => index)
 
-// Evidência reproduzível da carga histórica versionada em queries/. Não representa
-// a execução curta da tela; os números e o método estão em queries/benchmarks.md.
+// Evidência reproduzível da carga histórica versionada em queries/. Só aparece
+// enquanto a medição do cluster conectado ($collStats via /api/storage) não chega,
+// e é rotulada como benchmark; os números e o método estão em queries/benchmarks.md.
 const BUCKETIZATION_BENCHMARK = Object.freeze({
   events: 44_733_964,
   buckets: 2_613_915,
@@ -47,8 +48,22 @@ const BUCKETIZATION_BENCHMARK = Object.freeze({
   totalReduction: 3.73,
 })
 
+function bucketizacaoMedida(storage) {
+  const ts = storage?.timeseries
+  if (!storage?.available || !ts?.documents || !ts?.buckets) return null
+  return {
+    events: ts.documents,
+    buckets: ts.buckets,
+    eventsPerBucket: ts.documents / ts.buckets,
+    dataReduction: storage.storage_ratio,
+    totalReduction: storage.total_ratio,
+    measuredAt: new Date(Date.now() - (storage.measured_seconds_ago ?? 0) * 1000),
+  }
+}
+
 export default function App() {
   const [health, setHealth] = useState(null)
+  const [storage, setStorage] = useState(null)
   const [live, setLive] = useState(null)
   const [overview, setOverview] = useState(null)
   const [ocupado, setOcupado] = useState(false)
@@ -70,8 +85,12 @@ export default function App() {
   const bucketMaximoMinutos = colecao.bucket_max_span_seconds
     ? colecao.bucket_max_span_seconds / 60
     : null
-  const [databaseName, collectionName] = (overview?.namespace
-    ?? 'trilho_pagamentos.payment_events_live').split('.')
+  // Antes do primeiro overview o namespace vem do /health: a mesma tela roda contra
+  // a demo e contra um banco *_test, e mostrar o nome errado seria afirmar algo falso.
+  const namespaceLive = overview?.namespace
+    ?? `${health?.database ?? 'trilho_pagamentos'}.payment_events_live`
+  const namespaceHistorico = `${health?.database ?? 'trilho_pagamentos'}.payment_events`
+  const [databaseName, collectionName] = namespaceLive.split('.')
 
   const fallbackAnterior = useCallback(async (statusConhecido = null) => {
     const status = statusConhecido ?? await api.liveStatus()
@@ -84,7 +103,7 @@ export default function App() {
         : null
       const anteriores = anterior?.points ?? []
       return {
-        namespace: 'trilho_pagamentos.payment_events_live',
+        namespace: undefined,
         points: ponto ? [...anteriores, ponto].slice(-60) : anteriores,
         collection: {
           exists: null,
@@ -131,6 +150,10 @@ export default function App() {
       })
       .catch((e) => ativo && setErro(e.message))
 
+    // Medição do próprio cluster: substitui o benchmark histórico quando chega. Falha
+    // aqui não é erro da prova ao vivo — a faixa continua rotulada como benchmark.
+    api.storage().then((s) => ativo && setStorage(s)).catch(() => {})
+
     return () => { ativo = false }
   }, [atualizar, fallbackAnterior])
 
@@ -167,6 +190,9 @@ export default function App() {
       setOcupado(false)
     }
   }
+
+  const medida = bucketizacaoMedida(storage)
+  const bucketizacao = medida ?? BUCKETIZATION_BENCHMARK
 
   const prova = useMemo(() => ({
     eventos: live?.written,
@@ -279,17 +305,19 @@ export default function App() {
           <section className="bucketization-result" aria-label="Resultado medido da bucketização">
             <header>
               <strong>Resultado da bucketização</strong>
-              <span>benchmark medido · mesmo schema · não é esta execução ao vivo</span>
+              <span>{medida
+                ? `medido neste cluster · $collStats em ${namespaceHistorico} às ${hora(medida.measuredAt)}`
+                : 'benchmark histórico · mesmo schema · aguardando $collStats deste cluster'}</span>
             </header>
             <div className="bucketization-conversion">
-              <span><strong>{numero(BUCKETIZATION_BENCHMARK.events)}</strong> medições</span>
+              <span><strong>{numero(bucketizacao.events)}</strong> medições</span>
               <i aria-hidden="true">→</i>
-              <span><strong>{numero(BUCKETIZATION_BENCHMARK.buckets)}</strong> buckets</span>
-              <small>{numero(BUCKETIZATION_BENCHMARK.eventsPerBucket, 1)} medições/bucket</small>
+              <span><strong>{numero(bucketizacao.buckets)}</strong> buckets</span>
+              <small>{numero(bucketizacao.eventsPerBucket, 1)} medições/bucket</small>
             </div>
             <div className="bucketization-gain">
-              <span><strong>{numero(BUCKETIZATION_BENCHMARK.dataReduction, 2)}×</strong> menos dados</span>
-              <span><strong>{numero(BUCKETIZATION_BENCHMARK.totalReduction, 2)}×</strong> menos com índices</span>
+              <span><strong>{numero(bucketizacao.dataReduction, 2)}×</strong> menos dados</span>
+              <span><strong>{numero(bucketizacao.totalReduction, 2)}×</strong> menos com índices</span>
             </div>
           </section>
 
@@ -312,7 +340,7 @@ export default function App() {
           </section>
 
           <QueryDetails pipeline={overview?.pipeline}
-                        namespace={overview?.namespace ?? 'trilho_pagamentos.payment_events_live'}
+                        namespace={namespaceLive}
                         elapsedMs={overview?.elapsed_ms} />
         </section>
 

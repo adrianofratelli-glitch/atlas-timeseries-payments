@@ -40,6 +40,7 @@ def main() -> None:
     ap.add_argument("--db", default=None)
     ap.add_argument("--seed", type=int, default=common.SEED)
     args = ap.parse_args()
+    common.guard_write(args.db)
 
     d = common.db(args.db)
     info = d.dataset_info.find_one({"_id": args.collection})

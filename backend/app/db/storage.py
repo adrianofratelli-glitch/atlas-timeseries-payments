@@ -7,6 +7,7 @@ quantos eventos cada uma cobre.
 """
 from __future__ import annotations
 
+import os
 import time
 
 from .client import db, with_retry
@@ -16,7 +17,7 @@ from .client import db, with_retry
 # instante da medição no payload para a tela poder dizer quando foi medido.
 _CACHE: dict | None = None
 _CACHE_AT = 0.0
-CACHE_SECONDS = 600.0
+CACHE_SECONDS = float(os.getenv("STORAGE_CACHE_SECONDS", "600"))
 
 COLECOES = ("payment_events", "payment_events_flat")
 

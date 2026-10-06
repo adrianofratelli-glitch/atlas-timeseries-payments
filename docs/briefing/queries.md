@@ -50,7 +50,7 @@ VARIANTES = {
 }
 ```
 
-A collection de produção (documentada em `docs/briefing/02-mongodb.md` original,
+A collection de produção (documentada em `schema/collections.md`,
 confirmada no schema) usa:
 
 ```js
@@ -109,8 +109,10 @@ coleção histórica (ver `queries.md#a-transação-de-incidente` e
 
 ## Índices
 
-Arquivo: `schema/indexes.js` (idempotente — `createIndex` é no-op se já existe;
-roda com `mongosh "$MONGODB_URI" schema/indexes.js`).
+Fonte única: `common.INDEXES` em `data-generator/common.py`, aplicada por
+`common.ensure_indexes()` no fim de `scripts/reset_demo.py` (idempotente —
+`create_index` é no-op se já existe; não depende de mongosh). Os índices 12–14 são
+criados por `services/live.py::ensure_collection()` no primeiro play.
 
 | # | Coleção | Índice | Por quê |
 |---|---|---|---|
@@ -375,16 +377,18 @@ result = with_retry(lambda: db().command("listCollections", filter={"name": COLL
 timeseries = result["cursor"]["firstBatch"][0]["options"]["timeseries"]
 ```
 
-Bucket físico (`live.py:38-82`), consulta direta em
-`system.buckets.payment_events_live`:
+Bucket físico (`live.py::_bucket_snapshot`). MongoDB 8.2+/9.0 recusa ler
+`system.buckets.*` ("Direct access to timeseries buckets namespaces is not allowed
+anymore"); o caminho suportado é o próprio namespace com `rawData: true`, e o
+namespace interno fica como segunda tentativa para servidores antigos:
 
 ```python
-bucket_collection = db()[f"system.buckets.{COLLECTION}"]
-bucket = bucket_collection.find_one(
-    {**{f"meta.{k}": v for k, v in meta.items()},
-     "control.min.ts": {"$lte": timestamp}, "control.max.ts": {"$gte": timestamp}},
-    {"_id": 1, "meta": 1, "control.version": 1, "control.count": 1,
-     "control.min.ts": 1, "control.max.ts": 1})
+db().command("find", "payment_events_live",
+    filter={**{f"meta.{k}": v for k, v in meta.items()},
+            "control.min.ts": {"$lte": timestamp}, "control.max.ts": {"$gte": timestamp}},
+    projection={"_id": 1, "meta": 1, "control.version": 1, "control.count": 1,
+                "control.min.ts": 1, "control.max.ts": 1},
+    limit=1, singleBatch=True, maxTimeMS=MAX_TIME_MS, rawData=True)
 ```
 
 Expõe só `meta` e `control.min/max/count/version` — o cabeçalho do bucket, nunca

@@ -20,7 +20,9 @@ def _collection_options() -> dict:
     """Lê a configuração real da coleção, com cache para não consultar a cada poll."""
     global _OPTIONS_CACHE
     now = time.monotonic()
-    if now - _OPTIONS_CACHE[0] < 30 and _OPTIONS_CACHE[1]:
+    # Só a configuração de uma coleção existente vai para o cache: "ainda não existe"
+    # cacheado por 30 s deixava timeField/metaField em branco logo depois do play.
+    if now - _OPTIONS_CACHE[0] < 30 and _OPTIONS_CACHE[1].get("exists"):
         return _OPTIONS_CACHE[1]
 
     result = with_retry(lambda: db().command(
@@ -43,9 +45,11 @@ def _collection_options() -> dict:
 def _bucket_snapshot(last_document: dict | None) -> dict | None:
     """Lê o bucket físico que contém a amostra já confirmada pelo feed.
 
-    A igualdade é feita campo a campo porque a ordem BSON do subdocumento `meta`
-    não faz parte do contrato da API. A consulta usa os índices internos derivados
-    dos índices da coleção time series e projeta apenas o cabeçalho do bucket.
+    MongoDB 8.2+/9.0 proíbe ler `system.buckets.*` diretamente; o caminho suportado é
+    o próprio namespace da coleção com `rawData: true`, que devolve o bucket em vez
+    da medição desempacotada. Servidores anteriores ainda aceitam o namespace
+    interno, usado como segunda tentativa. A igualdade em `meta` é campo a campo
+    porque a ordem BSON do subdocumento não faz parte do contrato da API.
     """
     if not last_document:
         return None
@@ -54,14 +58,22 @@ def _bucket_snapshot(last_document: dict | None) -> dict | None:
     if not timestamp or not meta:
         return None
 
-    bucket_collection = db()[f"system.buckets.{COLLECTION}"]
-    try:
-        bucket = _find_bucket(bucket_collection, meta, timestamp)
-    except OperationFailure as exc:
-        # MongoDB recente bloqueia leitura direta de system.buckets.*; a prova
-        # física do bucket fica indisponível, mas o restante do painel segue vivo.
-        log.warning("snapshot do bucket indisponível: %s", exc.details.get("errmsg", exc) if exc.details else exc)
-        return None
+    filtro = {
+        **{f"meta.{key}": value for key, value in meta.items()},
+        "control.min.ts": {"$lte": timestamp},
+        "control.max.ts": {"$gte": timestamp},
+    }
+    bucket, source = None, None
+    for leitor, origem in ((_find_bucket_raw, f"{COLLECTION} · rawData"),
+                           (_find_bucket_legacy, f"system.buckets.{COLLECTION}")):
+        try:
+            bucket = leitor(filtro)
+        except OperationFailure as exc:
+            log.info("leitura de bucket via %s indisponível: %s", origem,
+                     (exc.details or {}).get("errmsg", exc))
+            continue
+        source = origem
+        break
     if not bucket:
         return None
 
@@ -75,26 +87,25 @@ def _bucket_snapshot(last_document: dict | None) -> dict | None:
         "measurements": control.get("count"),
         "control_version": version,
         "compressed": isinstance(version, int) and version >= 2,
-        "source": f"system.buckets.{COLLECTION}",
+        "source": source,
     }
 
 
-def _find_bucket(bucket_collection, meta: dict, timestamp) -> dict | None:
-    return with_retry(lambda: bucket_collection.find_one(
-        {
-            **{f"meta.{key}": value for key, value in meta.items()},
-            "control.min.ts": {"$lte": timestamp},
-            "control.max.ts": {"$gte": timestamp},
-        },
-        {
-            "_id": 1,
-            "meta": 1,
-            "control.version": 1,
-            "control.count": 1,
-            "control.min.ts": 1,
-            "control.max.ts": 1,
-        },
-    ))
+_BUCKET_PROJECTION = {"_id": 1, "meta": 1, "control.version": 1, "control.count": 1,
+                      "control.min.ts": 1, "control.max.ts": 1}
+
+
+def _find_bucket_raw(filtro: dict) -> dict | None:
+    resposta = with_retry(lambda: db().command(
+        "find", COLLECTION, filter=filtro, projection=_BUCKET_PROJECTION, limit=1,
+        singleBatch=True, maxTimeMS=MAX_TIME_MS, rawData=True))
+    linhas = resposta.get("cursor", {}).get("firstBatch", [])
+    return linhas[0] if linhas else None
+
+
+def _find_bucket_legacy(filtro: dict) -> dict | None:
+    return with_retry(lambda: db()[f"system.buckets.{COLLECTION}"].find_one(
+        filtro, _BUCKET_PROJECTION, max_time_ms=MAX_TIME_MS))
 
 
 def overview(session_started_at: datetime | None = None,
@@ -103,6 +114,12 @@ def overview(session_started_at: datetime | None = None,
     # O segundo corrente ainda está sendo escrito. Exibi-lo cria uma queda falsa no
     # último ponto (por exemplo, 16 contra 2,3 k) que desaparece no poll seguinte.
     end = datetime.now(timezone.utc).replace(microsecond=0)
+    # Também não passa do último lote confirmado: o lote em voo ainda vai preencher
+    # o segundo em que o anterior terminou.
+    ultimo = (last_document or {}).get("ts")
+    if isinstance(ultimo, datetime):
+        ultimo = ultimo if ultimo.tzinfo else ultimo.replace(tzinfo=timezone.utc)
+        end = min(end, ultimo.replace(microsecond=0))
     window_start = end - timedelta(seconds=60)
     # Uma nova execução começa uma curva nova sem apagar dado. O TTL continua
     # responsável pela retenção, como seria numa operação real.

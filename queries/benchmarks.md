@@ -8,6 +8,53 @@ in `bench-results.json`, `bucket-experiment.json`, `cardinality-experiment.json`
 Re-measure rather than copy forward when the cluster, the volume or the traffic shape
 changes.
 
+## Reduced-scale re-measurement — 2026-10-06
+
+A check that the mechanism reproduces, not a replacement for the full-scale numbers
+below. Same shared M20 (MongoDB 9.0.3), a separate `trilho_pagamentos_test` database
+recreated by `scripts/reset_demo.py --days 3 --eps 10`, measured from a host whose
+network floor to the cluster was **205 ms p50** (`hello`), roughly 0.7× the floor of
+the September runs. Raw output was kept outside the repository (`--out`) so the
+versioned full-scale JSON files below were not overwritten.
+
+| Measurement | Result |
+|---|---:|
+| events / days / providers | 2 422 149 / 3 / 44 |
+| time series load, 4 route-partitioned writers | 16 559/s, 14 635/s (two resets) |
+| plain collection load, same writer, 1 day | 15 955/s, 17 168/s |
+| buckets / measurements per bucket | 151 122 / 16.0 |
+| time series B/event · total incl. indexes | 23.28 · 33.91 |
+| plain collection B/event · total incl. indexes | 48.46 · 77.80 |
+| **storage per event, plain ÷ time series** | **2.08×** (data) · **2.29×** (incl. indexes) |
+
+The storage ratio was read through `/api/storage` (`$collStats`); a second reset read
+1.95× / 2.20× on the UI strip, which is the spread to expect from `storageSize` right
+after a bulk load.
+
+Query latency, `bench.py --runs 20`, end to end from the host (subtract ~205 ms floor):
+
+| Query | p50 | p95 |
+|---|---:|---:|
+| latency percentiles, PIX channel, 1 h | 373.0 ms | 464.3 ms |
+| latency percentiles, PIX channel, 24 h | 1 041.4 ms | 1 208.4 ms |
+| latency percentiles, one provider, 24 h | 335.9 ms | 505.3 ms |
+| same with `$densify` + `$fill` | 345.3 ms | 517.2 ms |
+| one provider, whole dataset (3 days) | 607.0 ms | 734.1 ms |
+| provider health z-score, 24 h | 436.6 ms | 524.3 ms |
+| provider health z-score, whole dataset | 827.5 ms | 920.5 ms |
+| ranking, 1 h · 6 h | 308.1 · 858.2 ms | 462.8 · 996.9 ms |
+| account velocity (1 h, 6 h, 24 h in one pass) | 358.4 ms | 506.5 ms |
+| whole PIX channel, 7 days | refused by the API (24 h ceiling without a provider) | — |
+
+Mixed load, `stress.py --max 32 --seconds 10`: no 500 and no dead connection up to 32
+clients; 145 of 597 calls refused with 429 at 16–32 clients by design; interactive p95
+1 883.5 ms at the peak (network floor included).
+
+Live stage, same session: 2 290–2 420 events/s observed in the UI with 718–959 ms batch
+acknowledgement and 495–708 ms concurrent aggregation, consistent with the September
+stage default. The ADR 0001 sample was re-run at 200 000 events; see the dated section
+at the end of `docs/adr/0001-bucketing.md`.
+
 ## Live stage capacity — 2026-09-03
 
 `tests/live_ingest_capacity.py` drives the exact API behind the Play button: one mixed
@@ -190,9 +237,10 @@ instead of taking the interactive path down with it, and the interactive p95 sta
 ## Reproducing
 
 ```bash
-.venv/bin/python queries/bench.py --runs 20                # the latency table
-.venv/bin/python queries/bucket_experiment.py              # ADR 0001
-.venv/bin/python queries/cardinality_experiment.py         # ADR 0002
-.venv/bin/python tests/stress.py --max 32                  # the mixed-load table
-.venv/bin/python tests/test_resilience.py                  # 52 hostile cases
+# writers refuse a database not ending in _test unless ALLOW_DEMO_DB_WRITE=1
+.venv/bin/python queries/bench.py --runs 20 [--db X_test --out /tmp/b.json]   # latency
+.venv/bin/python queries/bucket_experiment.py --db X_test [--out /tmp/k.json] # ADR 0001
+.venv/bin/python queries/cardinality_experiment.py --db X_test               # ADR 0002
+.venv/bin/python tests/stress.py --max 32 [--out /tmp/s.json]                 # mixed load
+.venv/bin/python tests/test_resilience.py                  # 58 hostile cases, *_test API
 ```

@@ -61,10 +61,11 @@ index and 7× the write throughput, and it does not even pay for itself on the r
 
 ## Consequences
 
-- `conta_id` stays a measurement field, and `schema/indexes.js` creates
+- `conta_id` stays a measurement field, and `common.INDEXES` (applied by
+  `scripts/reset_demo.py`) creates
   `{conta_id: 1, ts: 1}`. The velocity pipeline in `backend/app/db/velocity.py` matches
   on it directly.
-- The rule for `meta` is stated as an invariant in `docs/briefing/01-arquitetura.md`:
+- The rule for `meta` is stated as an invariant in `docs/briefing/architecture.md`:
   **identity of the route, never the identity of the actor, and never anything mutable.**
 - Two million accounts, not tens of millions. The direction of this result is
   structural — it follows from one series per distinct meta value — and does not reverse

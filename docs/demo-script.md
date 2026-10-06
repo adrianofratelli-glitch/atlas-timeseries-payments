@@ -32,10 +32,12 @@ Let the graph grow for at least 20 seconds. Do not click anything else. The fixe
 finished chart stretching to fill its container.
 
 Use the compact strip to connect mechanism to outcome: the live bucket proves how Atlas
-stores a route; the historical benchmark proves the aggregate effect on the same schema.
-Say explicitly that 44.7 M measurements became 2.61 M buckets and used 2.26× less data
-per event, or 3.73× less total storage per event including indexes. Do not present these
-as numbers produced by the short live run.
+stores a route; the strip proves the aggregate effect on the same schema. Its subtitle
+says where the numbers come from — **"medido agora neste cluster"** is `$collStats` on
+the connected `payment_events` versus `payment_events_flat` (per event, since the flat
+sample covers one day), and **"benchmark histórico"** is the versioned full-scale run
+(44.7 M measurements → 2.61 M buckets, 2.26× / 3.73×), shown only until the cluster
+measurement arrives. Neither is produced by the short live run; say so.
 
 Point to **Documento confirmado**. It changes only after a successful write. The motion
 is a representation of confirmed batches; it is not an independent frontend animation
@@ -64,3 +66,5 @@ delete history.
 | Atlas not connected | stop; verify `/health` before presenting |
 | Curve is empty after Play | check the API error and `last_error` in `/api/live/status` |
 | Collection says it will be created on Play | press Play once; collection configuration is read back afterwards |
+| "Bucket observado" stays on *aguardando* | the server refused both `rawData` and `system.buckets`; the rest of the proof is unaffected — say the physical header is unavailable on this server version |
+| `/health` reports 0 events or no flat sample | recreate the data: `ALLOW_DEMO_DB_WRITE=1 .venv/bin/python scripts/reset_demo.py` (full scale, >30 min) |

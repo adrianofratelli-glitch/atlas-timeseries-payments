@@ -3,6 +3,17 @@ async function boundedRequest(work, timeoutMs = 30000) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try { return await work(controller.signal) }
+  catch (e) {
+    // "Failed to fetch" não diz o que houve nem como resolver: traduz as duas falhas
+    // de transporte que o apresentador pode encontrar.
+    if (e?.name === 'AbortError') {
+      throw Object.assign(new Error(`A API não respondeu em ${Math.round(timeoutMs / 1000)} s. O cluster pode estar sobrecarregado; tente de novo em instantes`), { status: 0 })
+    }
+    if (e instanceof TypeError && e.status === undefined) {
+      throw Object.assign(new Error('Sem conexão com a API (backend parado ou rede indisponível). Reinicie a PoV pelo portal ou rode ./start.sh'), { status: 0 })
+    }
+    throw e
+  }
   finally { clearTimeout(timer) }
 }
 

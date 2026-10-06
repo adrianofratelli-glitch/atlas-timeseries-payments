@@ -80,11 +80,14 @@ Play (frontend)
   → services/live.py: LiveFeed._run() em thread própria
       gera PIX + cartão + TED no mesmo lote (Poisson por canal, distribuição por
       provedor com peso de participação, latência lognormal, recusa por taxa base)
-      → insert_many() em payment_events_live (time series, TTL 1h) com with_retry()
+      → insert_idempotent() em payment_events_live (time series, TTL 1h): _id fixado
+        antes do envio; numa repetição após queda de rede, confere o que já chegou
+        e reenvia só o resto (time series não tem _id único)
   → frontend faz poll de 1 s em GET /api/live/overview
       → db/live.py: agrega os últimos 60 s por segundo, exclui o segundo corrente
         (ainda sendo escrito), lê a config real via listCollections (cache 30 s) e
-        o bucket físico via system.buckets.payment_events_live
+        o bucket físico via find(rawData: true) em payment_events_live (MongoDB
+        8.2+ bloqueia system.buckets.*; servidores antigos caem nesse namespace)
   → uPlot.setData() — o canvas nunca é recriado a cada poll
 ```
 
@@ -155,11 +158,18 @@ python3 -m venv .venv && .venv/bin/pip install -r data-generator/requirements.tx
 python3 -m venv backend/venv && backend/venv/bin/pip install -r backend/requirements.txt
 (cd frontend && npm install)
 
-bash data-generator/run_all.sh     # cadastro, eventos, amostra flat, contas demo, índices
+# reset único (recusa banco que não termina em _test sem ALLOW_DEMO_DB_WRITE=1)
+.venv/bin/python scripts/reset_demo.py --db trilho_pagamentos_test --days 3 --eps 10
+ALLOW_DEMO_DB_WRITE=1 .venv/bin/python scripts/reset_demo.py          # demo, 7 d × 75/s
+ALLOW_DEMO_DB_WRITE=1 .venv/bin/python scripts/reset_demo.py --resume # retoma carga
 ./start.sh                         # 8400 + 5400
+MONGODB_DB=trilho_pagamentos_test ./start.sh   # mesma app no banco de teste
 POV_DEV=1 ./start.sh               # HMR + uvicorn --reload
 ```
 
 O gerador é idempotente via `det_id(kind, *parts)` (`uuid5` sobre os atributos
 chave) em tudo, exceto nos eventos: time series não tem `_id` controlável pelo
-usuário, logo não tem upsert. Recarregar eventos exige `--drop`.
+usuário, logo não tem upsert. Recarregar eventos exige `--drop`; uma carga
+interrompida é retomada com `--resume` a partir do checkpoint diário em
+`dataset_info` (`days_done`, `day_events`, janela planejada): dias confirmados são
+pulados e o dia parcial é apagado e regravado.
