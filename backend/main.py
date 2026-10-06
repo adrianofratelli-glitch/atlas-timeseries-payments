@@ -27,7 +27,7 @@ from app.services.alerts import hub
 from app.services.live import feed
 
 app = FastAPI(title="Telemetria do trilho de pagamentos · MongoDB Atlas time series",
-              version="1.0.0")
+              version="1.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=[
     f"http://127.0.0.1:{os.getenv('FRONTEND_PORT', '5400')}",
     f"http://localhost:{os.getenv('FRONTEND_PORT', '5400')}",
