@@ -5,8 +5,10 @@ import time
 from threading import Lock
 from typing import Callable, TypeVar
 
+from bson import ObjectId
 from pymongo import MongoClient
-from pymongo.errors import AutoReconnect, ConnectionFailure, NetworkTimeout
+from pymongo.errors import (AutoReconnect, BulkWriteError, ConnectionFailure,
+                            NetworkTimeout)
 
 from ..config import MONGODB_DB, MONGODB_URI
 
@@ -43,4 +45,50 @@ def with_retry(fn: Callable[[], T], attempts: int = 3) -> T:
                 raise
             time.sleep(delay)
             delay *= 2
+    raise RuntimeError("inalcançável")
+
+
+_TRANSITORIOS = (AutoReconnect, NetworkTimeout, ConnectionFailure)
+
+
+def insert_idempotent(col, docs: list[dict], attempts: int = 3) -> int:
+    """`insert_many` que pode ser repetido sem duplicar medições.
+
+    Coleção time series não tem índice único em `_id`: repetir um lote cujo ack se
+    perdeu na rede grava cada evento duas vezes, e a curva da tela mostra o dobro.
+    O `_id` é fixado ANTES da primeira tentativa; numa repetição, o lote é conferido
+    contra o servidor (faixa de `ts` + `_id`, coberta pelo índice `ts_1`) e só o que
+    não chegou é reenviado. Devolve quantos documentos esta chamada gravou.
+    """
+    if not docs:
+        return 0
+    for doc in docs:
+        doc.setdefault("_id", ObjectId())
+    pendentes = docs
+    gravados = 0
+    delay = 0.2
+    for tentativa in range(attempts):
+        try:
+            col.insert_many(pendentes, ordered=False)
+            return gravados + len(pendentes)
+        except (BulkWriteError, *_TRANSITORIOS) as exc:
+            if isinstance(exc, BulkWriteError):
+                erros = exc.details.get("writeErrors", [])
+                # Erro de validação não se cura repetindo; só falha de rede no meio.
+                if erros and not exc.details.get("writeConcernErrors"):
+                    raise
+            if tentativa == attempts - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2
+            ids = [d["_id"] for d in pendentes]
+            inicio = min(d["ts"] for d in pendentes)
+            fim = max(d["ts"] for d in pendentes)
+            presentes = {r["_id"] for r in with_retry(lambda: list(col.find(
+                {"ts": {"$gte": inicio, "$lte": fim}, "_id": {"$in": ids}},
+                {"_id": 1})))}
+            gravados += len(presentes)
+            pendentes = [d for d in pendentes if d["_id"] not in presentes]
+            if not pendentes:
+                return gravados
     raise RuntimeError("inalcançável")

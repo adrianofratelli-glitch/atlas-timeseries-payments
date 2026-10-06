@@ -14,7 +14,7 @@ O timestamp gravado é o **real**. O relógio simulado só escolhe a forma do tr
 (hora do dia). Ele é ancorado na data da base e abre às 10h de um dia útil. Carimbar
 esse relógio, horas ou dias no passado, faria a TTL apagar a série em menos de um minuto.
 
-Um único alimentador escreve PIX, cartão e TED no mesmo `insert_many`. Canal é uma
+Um único gerador escreve PIX, cartão e TED no mesmo `insert_many`. Canal é uma
 dimensão do evento e um filtro da análise, não uma escolha de pipeline de ingestão.
 
 `degradar` liga uma degradação em um provedor com a ingestão rodando: é o momento em
@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 
 from ..config import (LIVE_MINUTES_PER_TICK, LIVE_TARGET_EPS, LIVE_TICK_SECONDS,
                       LIVE_TTL_SECONDS)
-from ..db.client import db, with_retry
+from ..db.client import db, insert_idempotent
 
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
@@ -61,7 +61,7 @@ def ensure_collection():
 
 
 class LiveFeed:
-    """Um alimentador para o trilho inteiro; canal permanece apenas no documento."""
+    """Um gerador para o trilho inteiro; canal permanece apenas no documento."""
 
     def __init__(self) -> None:
         self._thread: threading.Thread | None = None
@@ -211,10 +211,19 @@ class LiveFeed:
             while self.simulated_now.weekday() >= 5:
                 self.simulated_now += timedelta(days=1)
             self.state = "rodando"
+            anterior: datetime | None = None
 
             while not self._stop.is_set():
                 tick_started = time.monotonic()
                 agora = datetime.now(timezone.utc)
+                # Os eventos do lote se espalham pelo intervalo REAL desde o lote
+                # anterior. Com escrita mais lenta que o tick (backpressure), carimbar
+                # só o último segundo deixava segundos alternados quase vazios e a
+                # curva virava serra (2.364, 130, 2.352, 80…).
+                intervalo = LIVE_TICK_SECONDS if anterior is None else min(
+                    max((agora - anterior).total_seconds(), LIVE_TICK_SECONDS),
+                    5 * LIVE_TICK_SECONDS)
+                anterior = agora
                 dia = self.simulated_now
                 docs = []
                 por_canal = {canal: 0 for canal in self.canais}
@@ -243,7 +252,7 @@ class LiveFeed:
                         valores = np.clip(rng.lognormal(np.log(lo * 2.2), 0.9, n), 1.0, hi * 12)
                         ufs = rng.choice(len(UFS), size=n, p=UF_PESO)
                         prods = rng.integers(0, len(produtos), size=n)
-                        offs = rng.random(n) * LIVE_TICK_SECONDS
+                        offs = rng.random(n) * intervalo
                         contas = rng.integers(0, 2_000_000, size=n)
                         erros_idx = rng.integers(0, len(ERROS[canal]), size=n)
                         for off, pi, ui, valor, latencia_ms, ok, ei, conta in zip(
@@ -261,10 +270,10 @@ class LiveFeed:
                                 "conta_id": f"C{conta:09d}",
                             })
                 if docs:
-                    # Um único lote mistura os três canais. Falha transitória de rede
-                    # não pode matar a thread do feed, por isso usa o helper de retry.
-                    with_retry(lambda docs=docs: col.insert_many(docs, ordered=False))
-                    self.written += len(docs)
+                    # Um único lote mistura os três canais.
+                    # Falha transitória no meio do lote não mata o feed nem duplica:
+                    # a repetição confere o que o servidor já gravou.
+                    self.written += insert_idempotent(col, docs)
                     # A amostra só é publicada depois do insert_many retornar: ela
                     # pertence a um lote confirmado pelo cluster.
                     confirmado = max(docs, key=lambda item: item["ts"])
@@ -279,18 +288,21 @@ class LiveFeed:
 
                 self.ticks += 1
                 self.last_tick_written = len(docs)
-                # EWMA curto: comunica o pulso sem fazer o número saltar a cada lote.
-                instantaneo = len(docs) / LIVE_TICK_SECONDS
-                self.observed_eps = (instantaneo if self.ticks == 1 else
-                                     0.35 * instantaneo + 0.65 * self.observed_eps)
                 self.simulated_now = dia + timedelta(minutes=LIVE_MINUTES_PER_TICK)
                 elapsed = time.monotonic() - tick_started
+                # Taxa confirmada pelo relógio de parede do tick. Dividir pelo tick
+                # nominal (1 s) inflava o número sob backpressure: com o lote levando
+                # 2,4 s, a tela dizia 2.271/s quando o cluster confirmava ~1.000/s.
+                # EWMA curto: comunica o pulso sem fazer o número saltar a cada lote.
+                instantaneo = len(docs) / max(elapsed, LIVE_TICK_SECONDS)
+                self.observed_eps = (instantaneo if self.ticks == 1 else
+                                     0.35 * instantaneo + 0.65 * self.observed_eps)
                 self.last_tick_duration_ms = elapsed * 1000
                 # O tempo de escrita faz parte do tick; esperar um segundo adicional
                 # deixava o ritmo visual progressivamente mais lento que o declarado.
                 self._stop.wait(max(0.0, LIVE_TICK_SECONDS - elapsed))
             self.state = "parado"
-        except Exception as exc:  # noqa: BLE001 — o alimentador não derruba a API
+        except Exception as exc:  # noqa: BLE001 — o gerador não derruba a API
             self.last_error = f"{type(exc).__name__}: {exc}"
             self.state = "erro"
 
