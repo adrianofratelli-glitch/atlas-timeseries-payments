@@ -176,7 +176,11 @@ def main():
     ap.set_defaults(sort=True)
     ap.add_argument("--db", default=None)
     ap.add_argument("--seed", type=int, default=common.SEED)
+    ap.add_argument("--resume", action="store_true",
+                    help="retoma uma carga interrompida: pula dias já confirmados e "
+                         "regrava o dia parcial, sem duplicar eventos")
     args = ap.parse_args()
+    common.guard_write(args.db)
 
     d = common.db(args.db)
     provedores = list(d.provedores.find())
@@ -184,7 +188,18 @@ def main():
     if not provedores:
         sys.exit("sem provedores: rode generate_registry.py antes")
 
-    fim = common.utc_midnight(datetime.now(timezone.utc))
+    # Checkpoint por dia em dataset_info. A janela planejada também fica gravada: uma
+    # retomada no dia seguinte não pode deslocar o dataset para "hoje".
+    plano = d.dataset_info.find_one({"_id": args.collection}) if args.resume else None
+    retomando = bool(args.resume and plano and plano.get("planned_last_ts")
+                     and not args.drop)
+    if retomando:
+        fim = plano["planned_last_ts"].replace(tzinfo=timezone.utc)
+        args.days = plano.get("planned_days", args.days)
+        dias_feitos = set(plano.get("days_done", []))
+    else:
+        fim = common.utc_midnight(datetime.now(timezone.utc))
+        dias_feitos = set()
     inicio = fim - timedelta(days=args.days)
     for c in cenarios:
         if c["dia_offset"] is not None:
@@ -192,6 +207,15 @@ def main():
 
     col = ensure_collection(d, args.collection, args.variant, args.flat, args.drop)
     rng = np.random.default_rng(args.seed)
+    if not retomando:
+        d.dataset_info.update_one(
+            {"_id": args.collection},
+            {"$set": {"planned_first_ts": inicio, "planned_last_ts": fim,
+                      "planned_days": args.days, "days_done": [], "day_events": {},
+                      "complete": False}},
+            upsert=True)
+    else:
+        print(f"  retomando: {len(dias_feitos)}/{args.days} dias já confirmados", flush=True)
 
     # Medido neste cluster: uma thread insere ~10 k eventos/s e quatro chegam a
     # ~20 k/s; acima disso o M20 (2 vCPU) não escala e w=1 não muda nada. A geração
@@ -266,7 +290,21 @@ def main():
 
     for n in range(args.days):
         dia = inicio + timedelta(days=n)
+        pular = n in dias_feitos
+        antes = escritos[0]
+        if not pular and args.resume:
+            # Dia parcial de uma carga interrompida: apaga o que chegou e regrava o dia
+            # inteiro. Coleção time series não tem _id único, então "inserir de novo
+            # o que faltou" duplicaria o que já estava lá.
+            apagados = col.delete_many({"ts": {"$gte": dia, "$lt": dia + timedelta(days=1)}})
+            if apagados.deleted_count:
+                print(f"  dia {n+1}: {apagados.deleted_count:,} eventos parciais removidos",
+                      flush=True)
         for bloco in gerar_dia(rng, dia, provedores, cenarios, args.eps, args.accounts):
+            # O dia já confirmado ainda é gerado: o gerador é uma sequência
+            # determinística e pular a geração mudaria todos os dias seguintes.
+            if pular:
+                continue
             for doc in bloco:
                 m = doc["meta"]
                 rota = (m["canal"], m["provedor"], m["produto"], m["uf"])
@@ -285,6 +323,15 @@ def main():
                 despachar(rota, balde)
                 baldes[rota] = []
         drenar()
+        if not pular:
+            # Só marca o dia depois que todo lote dele foi confirmado pelo cluster.
+            for fila in filas:
+                fila.join()
+            if not falha:
+                d.dataset_info.update_one(
+                    {"_id": args.collection},
+                    {"$addToSet": {"days_done": n},
+                     "$set": {f"day_events.{n}": escritos[0] - antes}})
         print(f"  dia {n+1}/{args.days}  {escritos[0]:>12,} eventos  "
               f"{escritos[0]/max(time.time()-t0,1e-6):>9,.0f}/s", flush=True)
         if falha:
@@ -295,7 +342,10 @@ def main():
         fila.join()
     if falha:
         raise falha[0]
-    total = escritos[0]
+    # Total do dataset, não só desta execução: uma retomada escreve só os dias que
+    # faltavam, e o health da API lê este número.
+    info = d.dataset_info.find_one({"_id": args.collection}) or {}
+    total = sum((info.get("day_events") or {}).values()) or escritos[0]
 
     elapsed = time.time() - t0
     d.dataset_info.update_one(
@@ -304,12 +354,12 @@ def main():
                   "days": args.days, "events": total, "eps": args.eps,
                   "accounts": args.accounts, "providers": len(provedores),
                   "variant": args.variant, "flat": bool(args.flat),
-                  "sorted_insert": bool(args.sort),
+                  "sorted_insert": bool(args.sort), "complete": True,
                   "loaded_at": datetime.now(timezone.utc)}},
         upsert=True)
 
-    print(f"\n{args.collection}: {total:,} eventos em {elapsed:,.1f}s "
-          f"({total/elapsed:,.0f}/s), {len(provedores)} provedores, {args.days} dias")
+    print(f"\n{args.collection}: {total:,} eventos; esta execução escreveu "
+          f"{escritos[0]:,} em {elapsed:,.1f}s ({escritos[0]/elapsed:,.0f}/s), {len(provedores)} provedores, {args.days} dias")
 
 
 if __name__ == "__main__":

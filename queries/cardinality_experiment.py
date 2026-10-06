@@ -97,6 +97,7 @@ def main() -> None:
     ap.add_argument("--db", default=None)
     ap.add_argument("--seed", type=int, default=7)
     args = ap.parse_args()
+    common.guard_write(args.db)
 
     d = common.db(args.db)
     print(f"gerando {args.events:,} eventos sobre {args.accounts:,} contas...")

@@ -73,8 +73,11 @@ def main() -> None:
     ap.add_argument("--runs", type=int, default=20)
     ap.add_argument("--batch", type=int, default=25000)
     ap.add_argument("--db", default=None)
+    ap.add_argument("--out", default=None,
+                    help="arquivo de saída (padrão: o JSON versionado em bucket-experiment.json)")
     ap.add_argument("--seed", type=int, default=11)
     args = ap.parse_args()
+    common.guard_write(args.db)
 
     d = common.db(args.db)
     print(f"gerando {args.events:,} eventos...")
@@ -155,7 +158,7 @@ def main() -> None:
               f'{str(r["ratio_vs_flat"]) + "x":>7} {r["ingestao_por_s"]:10,}/s '
               f'{r["latencia_ms"]["p50"]:9.1f}ms {r["saude_ms"]["p50"]:8.1f}ms')
 
-    saida = os.path.join(ROOT, "queries", "bucket-experiment.json")
+    saida = args.out or os.path.join(ROOT, "queries", "bucket-experiment.json")
     with open(saida, "w") as fh:
         json.dump({"measured_at": datetime.now(timezone.utc).isoformat(),
                    "events": len(docs), "provedor": provedor, "runs": args.runs,

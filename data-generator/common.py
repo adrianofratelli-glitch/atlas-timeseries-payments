@@ -43,8 +43,65 @@ def client() -> MongoClient:
     return _CLIENT
 
 
+DEMO_DB = os.getenv("MONGODB_DB", "trilho_pagamentos")
+
+
 def db(name: str | None = None):
-    return client()[name or os.getenv("MONGODB_DB", "trilho_pagamentos")]
+    return client()[name or DEMO_DB]
+
+
+class DemoWriteRefused(SystemExit):
+    """Escrita destrutiva num banco que não é de teste, sem autorização explícita."""
+
+
+def guard_write(name: str | None) -> str:
+    """Recusa escrever fora de um banco `*_test` sem `ALLOW_DEMO_DB_WRITE=1`.
+
+    Os geradores recriam coleções com `--drop`. Rodar um deles por engano contra o
+    banco da demo apaga 45 milhões de eventos que levam mais de meia hora para voltar.
+    O banco de teste é o padrão seguro; o da demo exige a variável, dita em voz alta.
+    """
+    alvo = name or DEMO_DB
+    if alvo.endswith("_test_test"):
+        raise DemoWriteRefused(f"banco '{alvo}' tem sufixo _test duplicado; corrija --db")
+    if not alvo.endswith("_test") and os.getenv("ALLOW_DEMO_DB_WRITE") != "1":
+        raise DemoWriteRefused(
+            f"recusado: '{alvo}' não é um banco *_test. Para recriar a demo rode com "
+            "ALLOW_DEMO_DB_WRITE=1, ou use --db <nome>_test.")
+    return alvo
+
+
+# Única fonte dos índices do PoV (antes em schema/indexes.js, que exigia mongosh).
+# Índice em coleção time series indexa buckets, não eventos. `conta_id` é CAMPO DE
+# MEDIÇÃO, não metaField: com índice secundário, o velocity da conta é uma consulta
+# pontual sem multiplicar séries (docs/adr/0002-cardinalidade.md).
+#
+# Deliberadamente ausentes: índice em `valor`/`latencia_ms` ("todo evento acima de X"
+# não é pergunta deste workload) e {meta.uf, ts} (UF sempre vem com canal/provedor).
+INDEXES: dict[str, list[tuple[list[tuple[str, int]], dict]]] = {
+    "payment_events": [
+        ([("meta.provedor", 1), ("ts", 1)], {}),
+        ([("meta.canal", 1), ("ts", 1)], {}),
+        ([("conta_id", 1), ("ts", 1)], {}),
+    ],
+    "provedores": [
+        ([("provedor_id", 1)], {"unique": True}),
+        ([("canal", 1)], {}),
+        ([("em_incidente", 1)], {"sparse": True}),
+    ],
+    "degradation_scenarios": [([("provedor_id", 1), ("kind", 1)], {"unique": True})],
+    "demo_accounts": [([("conta_id", 1)], {"unique": True})],
+    "incidents": [([("provedor_id", 1), ("status", 1)], {}), ([("opened_at", -1)], {})],
+    "incident_alerts": [([("at", -1)], {})],
+}
+
+
+def ensure_indexes(d) -> dict[str, list[str]]:
+    """Idempotente: create_index é no-op quando o índice já existe."""
+    criados = {}
+    for nome, specs in INDEXES.items():
+        criados[nome] = [d[nome].create_index(chaves, **opts) for chaves, opts in specs]
+    return criados
 
 
 # ------------------------------------------------------------------------ canais

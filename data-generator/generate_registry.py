@@ -125,6 +125,7 @@ def main():
     ap.add_argument("--drop", action="store_true")
     ap.add_argument("--db", default=None)
     args = ap.parse_args()
+    common.guard_write(args.db)
 
     d = common.db(args.db)
     provedores, cenarios = build(args.seed)
