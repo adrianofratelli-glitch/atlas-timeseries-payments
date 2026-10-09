@@ -3,7 +3,9 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // Portas estritas: o registro do workspace é o PORTS.md, e o launcher preserva
-// quem já estiver escutando em vez de trocar de porta em silêncio.
+// quem já estiver escutando em vez de trocar de porta em silêncio. Host fixo em
+// 127.0.0.1: `localhost` pode resolver só para ::1 (ordem de DNS do Node), e aí o
+// start.sh, que sonda 127.0.0.1, dava "Frontend não ficou pronto" com o vite no ar.
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -15,6 +17,6 @@ export default defineConfig({
       ),
     },
   },
-  server: { port: 5400, strictPort: true },
-  preview: { port: 5400, strictPort: true },
+  server: { host: '127.0.0.1', port: 5400, strictPort: true },
+  preview: { host: '127.0.0.1', port: 5400, strictPort: true },
 })
