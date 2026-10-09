@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1 (2026-10-09)
+
+- Live clear no longer races the writer: start/stop/clear share a lifecycle lock, a write gate with an epoch makes clear wait for the in-flight batch and discard any later batch of the old session, the writer thread is joined, and `payment_events_live` is recreated as a time series with TTL and indexes before writes resume. A late insert can no longer recreate it as a plain collection. A concurrent start + clear no longer answers HTTP 500 (`cannot join thread before it is started`). Clear answers `409` instead of a false "cleared" when an in-flight write does not finish in time.
+- The insert path checks, under the gate, that the live collection is a time series; `ensure_collection` replaces a plain collection left behind by the old race.
+- `LIMITATIONS.md` rewritten from measurement: `queries/feature_probes.py` executes every quoted constraint on the connected server (9.0.4): explicit `_id` accepted but not unique, bucket span can grow but not shrink, change streams unsupported (code 115), rename accepted. ADR 0001, schema notes and briefing aligned.
+- Vite binds to `127.0.0.1`, the address `start.sh` probes; with `localhost` resolving to `::1` the launcher reported the frontend as not ready.
+- Regression suite `tests/test_live_lifecycle.py` (real cluster, `*_test`).
+
 ## 1.1.0 (2026-10-06)
 
 - UI: MongoDB 2026 "Dark Stage v4" layout (local Special Gothic / Source Code Pro fonts, staircase and grid motifs, staggered motion).

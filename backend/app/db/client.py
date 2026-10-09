@@ -51,7 +51,7 @@ def with_retry(fn: Callable[[], T], attempts: int = 3) -> T:
 _TRANSITORIOS = (AutoReconnect, NetworkTimeout, ConnectionFailure)
 
 
-def insert_idempotent(col, docs: list[dict], attempts: int = 3) -> int:
+def insert_idempotent(col, docs: list[dict], attempts: int = 3, gate=None) -> int:
     """`insert_many` que pode ser repetido sem duplicar medições.
 
     Coleção time series não tem índice único em `_id`: repetir um lote cujo ack se
@@ -59,6 +59,12 @@ def insert_idempotent(col, docs: list[dict], attempts: int = 3) -> int:
     O `_id` é fixado ANTES da primeira tentativa; numa repetição, o lote é conferido
     contra o servidor (faixa de `ts` + `_id`, coberta pelo índice `ts_1`) e só o que
     não chegou é reenviado. Devolve quantos documentos esta chamada gravou.
+
+    `gate`, quando informado, é uma fábrica de context manager que devolve `True`
+    se a escrita ainda pode acontecer. Cada tentativa de `insert_many` roda dentro
+    dele: quem apaga a coleção (o `clear` da ingestão ao vivo) segura o mesmo
+    portão, então nenhuma escrita fica em voo durante o drop e nenhuma escrita de
+    uma época anterior recria a coleção como coleção comum depois dele.
     """
     if not docs:
         return 0
@@ -69,7 +75,14 @@ def insert_idempotent(col, docs: list[dict], attempts: int = 3) -> int:
     delay = 0.2
     for tentativa in range(attempts):
         try:
-            col.insert_many(pendentes, ordered=False)
+            if gate is None:
+                col.insert_many(pendentes, ordered=False)
+            else:
+                with gate() as permitido:
+                    if not permitido:
+                        # Lote de uma época encerrada: descartado, nunca gravado.
+                        return gravados
+                    col.insert_many(pendentes, ordered=False)
             return gravados + len(pendentes)
         except (BulkWriteError, *_TRANSITORIOS) as exc:
             if isinstance(exc, BulkWriteError):

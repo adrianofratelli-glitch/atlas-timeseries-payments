@@ -427,9 +427,9 @@ dois incidentes "abertos" para o mesmo provedor).
 
 O evento que acorda o change stream é a própria marcação em `provedores` +
 `incidents.insert_one` — nunca uma escrita sintética em coleção separada. O
-listener (`app/services/alerts.py`) observa `incidents`, não `payment_events`: lá
-o change stream dispara uma vez por transação (dezenas por segundo), útil para uma
-pipeline, inútil para acordar uma tela.
+listener (`app/services/alerts.py`) observa `incidents`, não `payment_events`:
+coleção time series não suporta change stream (`watch()` falha com código 115,
+medido por `queries/feature_probes.py` no MongoDB 9.0.4).
 
 ---
 

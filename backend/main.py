@@ -24,10 +24,10 @@ from app.db.client import db
 from app.db.ranges import RangeError
 from app.services import limits
 from app.services.alerts import hub
-from app.services.live import feed
+from app.services.live import LiveBusy, feed
 
 app = FastAPI(title="Telemetria do trilho de pagamentos · MongoDB Atlas time series",
-              version="1.1.0")
+              version="1.1.1")
 app.add_middleware(CORSMiddleware, allow_origins=[
     f"http://127.0.0.1:{os.getenv('FRONTEND_PORT', '5400')}",
     f"http://localhost:{os.getenv('FRONTEND_PORT', '5400')}",
@@ -220,8 +220,15 @@ def reset():
     # Reiniciar a demo também para e apaga a ingestão ao vivo: senão o próximo
     # roteiro começa com a série da apresentação anterior ainda na tela.
     resultado = incidents.reset_demo()
-    resultado["ao_vivo"] = feed.clear()
+    resultado["ao_vivo"] = _clear_live()
     return resultado
+
+
+def _clear_live() -> dict:
+    try:
+        return feed.clear()
+    except LiveBusy as exc:
+        raise HTTPException(status_code=409, detail={"reason": str(exc)}) from exc
 
 
 # ---------------------------------------------------------------------- ao vivo
@@ -264,7 +271,7 @@ def live_stop():
 
 @app.post("/api/live/clear")
 def live_clear():
-    return feed.clear()
+    return _clear_live()
 
 
 @app.get("/api/live/status")

@@ -52,25 +52,51 @@ story, no failover timing, no DR claim.
 ## Constraints of the feature itself
 
 Properties of time series collections, not defects of this project, and each one is a
-question a DBA in the room will ask:
+question a DBA in the room will ask. Every item marked *measured* was executed by
+`queries/feature_probes.py` against the demo cluster (Atlas, MongoDB **9.0.4**, FCV 9.0,
+2026-10-09) on a disposable `*_test` database; the rest cites the official
+[time series limitations](https://www.mongodb.com/docs/manual/core/timeseries/timeseries-limitations/)
+and [automatic removal](https://www.mongodb.com/docs/manual/core/timeseries/timeseries-automatic-removal/)
+pages. On another server version, re-run the probe before repeating a claim.
 
-- **The bucket parameters are fixed at creation.** `bucketMaxSpanSeconds` and
-  `bucketRoundingSeconds` cannot be changed later; getting them wrong means recreating
-  the collection and rewriting the data. Measured before any code was written —
-  `docs/adr/0001-bucketing.md`.
+- **Bucket parameters can grow, not shrink.** *Measured:* `collMod` raising
+  `bucketMaxSpanSeconds`/`bucketRoundingSeconds` from 300 to 600 s returned `ok: 1`;
+  lowering 600 → 300 s was refused (code 72, "needs to be equal or greater"). The
+  documentation states the same rule and that `timeField`/`metaField` cannot change.
+  A span chosen too small can be widened in place; a span chosen too large means
+  recreating the collection and rewriting the data. The probe did not measure how
+  existing buckets behave after a `collMod`, so nothing is claimed about that.
+  Measured before any code was written — `docs/adr/0001-bucketing.md`.
 - **The bucket span is a ceiling, not a promise.** A bucket also closes on a measurement
   count and a size limit, so at high event density per route the span stops being the
   binding constraint.
-- **No user-controlled `_id`, therefore no upsert.** Reloading events means dropping and
-  rewriting.
-- **No unique index.** Deduplication has to happen before the write.
-- **Updates and deletes are restricted.** Correcting history is not free, and any design
-  that needs to rewrite the past routinely is fighting the storage engine.
-- **TTL expires buckets, not documents.** Retention is approximate at the bucket
-  boundary.
-- **The collection cannot be renamed** — it is a view over `system.buckets.*`.
-- **A change stream on the collection fires per event.** Useful for a pipeline, useless
-  for driving a screen, which is why the live alert watches `incidents`.
+- **`_id` is accepted but not unique.** *Measured:* an explicit `_id` is stored and
+  found by query, and a second insert with the same `_id` is also accepted (two
+  documents). Creating a unique index is refused (code 72). Deduplication therefore
+  happens before or around the write — `insert_idempotent` fixes the `_id` before the
+  first attempt and reconciles a retried batch against the server.
+- **No upsert, and updates only through the `metaField`.** *Measured:* `update_one`
+  with `upsert: true` was refused (code 72, non-multi update); an `updateMany` filtering
+  on a measurement field was refused (code 72); an `updateMany` filtering on and
+  changing `meta` was accepted. The documentation lists the same rules. Reloading
+  events means dropping and rewriting, which is why the generator uses `--drop` and a
+  per-day `--resume` checkpoint.
+- **Deletes by a measurement field work on this version.** *Measured:* `deleteMany`
+  filtering on `_id` removed the matching documents on 9.0.4. Not measured on older
+  servers; correcting history in bulk is still not the workload this storage favours.
+- **TTL expires buckets, not documents.** Per the documentation, a bucket is removed
+  only once all of its documents have expired, by a background task that runs every
+  60 s — retention is approximate at the bucket boundary. Not timed here.
+- **Rename works on this version.** *Measured:* `renameCollection` on the probe
+  collection returned `ok: 1` and the renamed collection is still a time series.
+  Older servers, where the collection was a view over `system.buckets.*`, are not
+  covered by this measurement.
+- **No change streams on a time series collection.** *Measured:* `watch()` on the
+  collection fails with code 115 (`CommandNotSupported`, "Cannot run aggregation on
+  timeseries"); a database-level stream delivered the event of a plain collection but
+  none for the time series insert within 5 s. The documentation lists change streams
+  (and Database Triggers) as unsupported. That is why the live alert watches the
+  `incidents` collection.
 - **`$percentile` with `method: "approximate"`** is a t-digest estimate. It is the mode
   supported over a stream of this size, and the approximation is irrelevant for deciding
   whether a provider degraded — but it is an estimate, and saying otherwise to a risk

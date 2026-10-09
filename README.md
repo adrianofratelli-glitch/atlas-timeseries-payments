@@ -117,6 +117,17 @@ Every Play starts a new logical session using `started_at`; it does not drop pre
 events. The query uses the later of the session start or the beginning of the rolling
 60-second window. TTL remains the only retention mechanism.
 
+**Clear / demo reset** (`/api/live/clear`, `/api/demo/reset`) is serialized with the
+writer: it stops the feed, waits for any in-flight `insert_many` (a write gate with an
+epoch), joins the writer thread and drops and **recreates** `payment_events_live` as a
+time series with its TTL and indexes before any writer can run again. A batch from an
+older epoch is discarded, and the insert path checks the collection is a time series
+under the same gate, so a late write can never recreate it as a plain collection. If
+an in-flight write does not finish within `LIVE_GATE_TIMEOUT_SECONDS` (20 s), the clear
+answers `409` and deletes nothing. Start, stop and clear share one lifecycle lock, so
+concurrent calls are serialized instead of racing. After an API restart the feed stays
+stopped (the data already written remains); Play starts a new session.
+
 ## Why a time series collection instead of a normal collection?
 
 A normal MongoDB collection can store timestamps, use TTL indexes and run aggregations.
@@ -268,8 +279,8 @@ backend/venv/bin/pip install -r backend/requirements.txt
 providers and planted scenarios, the `payment_events` time series
 (`bucketMaxSpanSeconds=86400`), a one-day `payment_events_flat` sample for the storage
 comparison, the demo accounts used by the velocity query, the runtime state
-(`incidents`, `incident_alerts`, `payment_events_live` — recreated with its 1 h TTL on
-the next Play), leftover experiment collections and every index.
+(`incidents`, `incident_alerts`, `payment_events_live` — recreated as a time series
+with its 1 h TTL), leftover experiment collections and every index.
 
 It refuses any database whose name does not end in `_test` unless
 `ALLOW_DEMO_DB_WRITE=1` is set, because it drops and reloads tens of millions of events.
@@ -309,6 +320,13 @@ Everything that writes runs against a `*_test` database. Start the API with
 python3 -m compileall -q backend tests scripts data-generator queries
 (cd frontend && npm run build && node --test tests/*.test.mjs)
 backend/venv/bin/python -m unittest tests/test_cors.py tests/test_client_concurrency.py
+
+# live feed lifecycle against the cluster (slow writer during clear, start/clear race);
+# uses and drops trilho_lifecycle_test
+backend/venv/bin/python -m unittest tests/test_live_lifecycle.py -v
+
+# every time series constraint quoted in LIMITATIONS.md, executed on the connected server
+.venv/bin/python queries/feature_probes.py --out /tmp/feature_probes.json
 
 # adversarial suites: hostile API input, and hostile ingestion straight into the cluster
 .venv/bin/python -m unittest discover -s tests/adversarial -p "test_*_adversarial.py" -v
