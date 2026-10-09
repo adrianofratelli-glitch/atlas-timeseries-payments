@@ -27,9 +27,13 @@ import os
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
-from ..config import (LIVE_MINUTES_PER_TICK, LIVE_TARGET_EPS, LIVE_TICK_SECONDS,
+from pymongo.errors import CollectionInvalid
+
+from ..config import (LIVE_CLEAR_JOIN_SECONDS, LIVE_GATE_TIMEOUT_SECONDS,
+                      LIVE_MINUTES_PER_TICK, LIVE_TARGET_EPS, LIVE_TICK_SECONDS,
                       LIVE_TTL_SECONDS)
 from ..db.client import db, insert_idempotent
 
@@ -40,16 +44,49 @@ sys.path.insert(0, os.path.join(
 COLLECTION = "payment_events_live"
 
 
+_TIMESERIES = {"timeField": "ts", "metaField": "meta",
+               # Bucket curto: aqui o objetivo é ver o dado chegar e expirar,
+               # não densidade de armazenamento.
+               "bucketMaxSpanSeconds": 300, "bucketRoundingSeconds": 300}
+
+
+class LiveBusy(RuntimeError):
+    """Uma escrita em voo não terminou dentro do prazo: o clear não apagou nada."""
+
+
+def collection_kind(d=None) -> str:
+    """`timeseries`, `ausente` ou o tipo errado com que a coleção existe."""
+    d = d if d is not None else db()
+    info = next(iter(d.list_collections(filter={"name": COLLECTION})), None)
+    if info is None:
+        return "ausente"
+    if info.get("type") == "timeseries" and info.get("options", {}).get("timeseries"):
+        return "timeseries"
+    return info.get("type") or "desconhecido"
+
+
 def ensure_collection():
+    """Garante a coleção time series com TTL e índices; nunca aceita coleção comum.
+
+    Um `insert_many` numa coleção que não existe cria uma coleção **comum**, sem
+    timeSeries e sem TTL — o oposto do que a PoV prova. Por isso a coleção é criada
+    explicitamente aqui e, se alguém a deixou como coleção comum (versão anterior
+    com a corrida do clear, ou um insert manual), ela é recriada: o dado ao vivo é
+    descartável por desenho (TTL de 1 h).
+    """
     d = db()
-    if COLLECTION not in d.list_collection_names():
-        d.create_collection(
-            COLLECTION,
-            timeseries={"timeField": "ts", "metaField": "meta",
-                        # Bucket curto: aqui o objetivo é ver o dado chegar e expirar,
-                        # não densidade de armazenamento.
-                        "bucketMaxSpanSeconds": 300, "bucketRoundingSeconds": 300},
-            expireAfterSeconds=LIVE_TTL_SECONDS)
+    kind = collection_kind(d)
+    if kind not in ("timeseries", "ausente"):
+        d[COLLECTION].drop()
+        kind = "ausente"
+    if kind == "ausente":
+        try:
+            d.create_collection(COLLECTION, timeseries=dict(_TIMESERIES),
+                                expireAfterSeconds=LIVE_TTL_SECONDS)
+        except CollectionInvalid:
+            # Outro processo criou entre a checagem e o create; confere o tipo.
+            if collection_kind(d) != "timeseries":
+                raise
     col = d[COLLECTION]
     # Provisionamento idempotente: uma coleção criada por versão anterior também
     # recebe os índices exigidos pelo workload atual. O overview filtra só por tempo;
@@ -60,13 +97,47 @@ def ensure_collection():
     return col
 
 
+class WriteGate:
+    """Portão entre o escritor ao vivo e quem apaga/recria a coleção.
+
+    O escritor captura a época ao nascer e só grava com o portão fechado e a época
+    ainda vigente. `clear` segura o mesmo portão para avançar a época, apagar e
+    recriar a coleção time series: uma escrita já em voo termina antes do drop, e
+    uma escrita atrasada de época anterior é descartada em vez de recriar a coleção
+    como coleção comum.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.epoch = 0
+
+    @contextmanager
+    def admit(self, epoch: int, check=None):
+        with self._lock:
+            yield epoch == self.epoch and (check is None or check())
+
+    @contextmanager
+    def exclusive(self, timeout: float):
+        if not self._lock.acquire(timeout=timeout):
+            raise LiveBusy("escrita ao vivo ainda em andamento; nada foi apagado")
+        try:
+            self.epoch += 1
+            yield self.epoch
+        finally:
+            self._lock.release()
+
+
 class LiveFeed:
     """Um gerador para o trilho inteiro; canal permanece apenas no documento."""
 
     def __init__(self) -> None:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
-        self._lock = threading.Lock()
+        # Serializa start/stop/clear: sem ele, um clear concorrente com um start
+        # chegava a `join()` numa thread criada mas ainda não iniciada (HTTP 500).
+        self._lock = threading.RLock()
+        self._gate = WriteGate()
+        self._epoch = 0
         self.canais = ("pix", "cartao", "ted")
         self.eps: float = LIVE_TARGET_EPS
         self.degradado: str | None = None
@@ -102,9 +173,13 @@ class LiveFeed:
             self.last_tick_duration_ms = 0.0
             self.last_document = None
             self.last_error = None
-            self._thread = threading.Thread(target=self._run, args=(eps,),
-                                            name="live-feed", daemon=True)
-            self._thread.start()
+            self._epoch = self._gate.epoch
+            thread = threading.Thread(target=self._run, args=(eps, self._epoch),
+                                      name="live-feed", daemon=True)
+            thread.start()
+            # Publicado só depois de iniciado: nenhum outro caminho enxerga uma
+            # thread que ainda não pode receber `join()`.
+            self._thread = thread
         for _ in range(60):
             if self.written or self.last_error:
                 break
@@ -119,29 +194,58 @@ class LiveFeed:
         self.fator_latencia = fator_latencia if provedor_id else 1.0
         return self.status()
 
-    def stop(self) -> dict:
-        self._stop.set()
+    def _join(self, timeout: float) -> bool:
+        """Espera o escritor terminar; devolve True se ele não está mais vivo."""
         t = self._thread
-        if t:
-            t.join(timeout=5)
-        self.state = "parado"
-        return self.status()
+        if t is None or not t.is_alive():
+            return True
+        t.join(timeout=timeout)
+        return not t.is_alive()
+
+    def stop(self) -> dict:
+        with self._lock:
+            self._stop.set()
+            parado = self._join(timeout=LIVE_CLEAR_JOIN_SECONDS)
+            # Só diz "parado" quando a thread morreu de fato; senão a tela mostraria
+            # parado com um lote ainda a caminho do cluster.
+            self.state = "parado" if parado else "parando"
+            return self.status()
 
     def clear(self) -> dict:
-        """Apaga o dado ao vivo agora, sem esperar a TTL."""
-        self.stop()
-        d = db()
-        if COLLECTION in d.list_collection_names():
-            d[COLLECTION].drop()
-        self.written = self.ticks = 0
-        self.written_by_channel = {canal: 0 for canal in self.canais}
-        self.last_tick_written = 0
-        self.observed_eps = 0.0
-        self.last_tick_duration_ms = 0.0
-        self.last_document = None
-        self.simulated_now = None
-        self.degradado = None
-        return self.status()
+        """Apaga o dado ao vivo agora, sem esperar a TTL.
+
+        Ordem que fecha a corrida com o escritor:
+        1. sinaliza parada e avança a época sob o portão — espera a escrita em voo
+           terminar, e qualquer lote posterior desta época é descartado;
+        2. junta a thread do gerador (prazo `LIVE_CLEAR_JOIN_SECONDS`);
+        3. ainda sob o portão, apaga e **recria** a coleção time series com TTL e
+           índices antes de liberar qualquer escritor.
+        Se uma escrita em voo não terminar no prazo do portão, nada é apagado e o
+        chamador recebe `LiveBusy` (HTTP 409), em vez de um "limpo" falso.
+        """
+        with self._lock:
+            self._stop.set()
+            with self._gate.exclusive(LIVE_GATE_TIMEOUT_SECONDS):
+                pass
+            parado = self._join(timeout=LIVE_CLEAR_JOIN_SECONDS)
+            with self._gate.exclusive(LIVE_GATE_TIMEOUT_SECONDS) as epoch:
+                d = db()
+                d[COLLECTION].drop()
+                ensure_collection()
+                self._epoch = epoch
+            self.written = self.ticks = 0
+            self.written_by_channel = {canal: 0 for canal in self.canais}
+            self.last_tick_written = 0
+            self.observed_eps = 0.0
+            self.last_tick_duration_ms = 0.0
+            self.last_document = None
+            self.simulated_now = None
+            self.degradado = None
+            self.last_error = None
+            # Um escritor que não saiu no prazo já não pode gravar (época vencida);
+            # o estado reflete isso sem fingir que a thread morreu.
+            self.state = "parado" if parado else "parando"
+            return self.status()
 
     def status(self) -> dict:
         return {
@@ -169,7 +273,23 @@ class LiveFeed:
         }
 
     # ------------------------------------------------------------------ execução
-    def _run(self, eps: float) -> None:
+    def _vigente(self, epoch: int) -> bool:
+        return epoch == self._gate.epoch
+
+    def _colecao_ok(self) -> bool:
+        """Checagem sob o portão: o insert nunca cria coleção implícita."""
+        kind = collection_kind()
+        if kind == "timeseries":
+            return True
+        if kind == "ausente":
+            # Apagada por fora (shell, script): recria como time series antes do lote.
+            ensure_collection()
+            return True
+        self.last_error = f"{COLLECTION} existe como '{kind}', não time series"
+        self._stop.set()
+        return False
+
+    def _run(self, eps: float, epoch: int) -> None:
         try:
             # Import dentro do try: fora dele, um ImportError morria como traceback de
             # thread e o status continuava dizendo "sem erro".
@@ -273,7 +393,14 @@ class LiveFeed:
                     # Um único lote mistura os três canais.
                     # Falha transitória no meio do lote não mata o feed nem duplica:
                     # a repetição confere o que o servidor já gravou.
-                    self.written += insert_idempotent(col, docs)
+                    gravados = insert_idempotent(
+                        col, docs,
+                        gate=lambda: self._gate.admit(epoch, self._colecao_ok))
+                    if not self._vigente(epoch) or self._stop.is_set() and not gravados:
+                        # Lote descartado pelo portão (clear em curso ou coleção
+                        # inválida): nada foi gravado, nada é publicado.
+                        break
+                    self.written += gravados
                     # A amostra só é publicada depois do insert_many retornar: ela
                     # pertence a um lote confirmado pelo cluster.
                     confirmado = max(docs, key=lambda item: item["ts"])
@@ -301,10 +428,13 @@ class LiveFeed:
                 # O tempo de escrita faz parte do tick; esperar um segundo adicional
                 # deixava o ritmo visual progressivamente mais lento que o declarado.
                 self._stop.wait(max(0.0, LIVE_TICK_SECONDS - elapsed))
-            self.state = "parado"
+            if self._vigente(epoch):
+                self.state = "erro" if self.last_error else "parado"
         except Exception as exc:  # noqa: BLE001 — o gerador não derruba a API
-            self.last_error = f"{type(exc).__name__}: {exc}"
-            self.state = "erro"
+            # Escritor de época vencida não sobrescreve o estado do feed atual.
+            if self._vigente(epoch):
+                self.last_error = f"{type(exc).__name__}: {exc}"
+                self.state = "erro"
 
 
 feed = LiveFeed()

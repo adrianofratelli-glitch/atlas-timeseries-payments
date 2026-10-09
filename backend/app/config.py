@@ -61,6 +61,12 @@ ARCHIVE_ENABLED = os.getenv("ARCHIVE_ENABLED", "false").lower() == "true"
 LIVE_TTL_SECONDS = _int("LIVE_TTL_SECONDS", 3600)
 LIVE_TICK_SECONDS = _float("LIVE_TICK_SECONDS", 1.0)
 LIVE_MINUTES_PER_TICK = _int("LIVE_MINUTES_PER_TICK", 5)
+# Prazos do clear: quanto esperar a escrita em voo (portão) e a saída do gerador.
+# Um lote normal confirma em poucos segundos; a soma fica abaixo do timeout de 60 s
+# usado pelos clientes de teste. Estourado o prazo do portão, o clear responde 409
+# sem apagar nada.
+LIVE_GATE_TIMEOUT_SECONDS = _float("LIVE_GATE_TIMEOUT_SECONDS", 20.0)
+LIVE_CLEAR_JOIN_SECONDS = _float("LIVE_CLEAR_JOIN_SECONDS", 35.0)
 # Média diária do trilho, repartida entre PIX, cartão e TED pelo mesmo modelo da
 # base histórica. A demo abre às 10h e, pela curva intradiária, observa ~2,3 k/s com
 # o padrão de 1,5 k/s. É um ritmo validado para o palco, não um sizing de produção.
