@@ -25,8 +25,19 @@ if not DB.endswith("_test"):
 os.environ["MONGODB_DB"] = DB
 sys.path.insert(0, os.path.join(ROOT, "backend"))
 
+import app.db.client as client_module  # noqa: E402
 from app.db.client import db, insert_idempotent  # noqa: E402
 from app.services import live  # noqa: E402
+
+# Rodando junto com outros módulos de teste, `app.config` pode já ter sido importado
+# com o banco do `.env` (a demo) ou com a URI fictícia de um teste sem cluster. Fixa
+# banco e URI reais aqui, para nunca escrever fora do *_test.
+if client_module.MONGODB_DB != DB or "localhost" in client_module.MONGODB_URI:
+    from dotenv import dotenv_values  # noqa: E402
+    client_module.MONGODB_DB = DB
+    client_module.MONGODB_URI = (os.getenv("LIFECYCLE_MONGODB_URI")
+                                 or dotenv_values(os.path.join(ROOT, ".env"))["MONGODB_URI"])
+    client_module._client = None
 
 PROVEDORES = [
     {"provedor_id": "PSP-T01", "canal": "pix", "participacao": 1.0, "recusa_base": 0.02},
