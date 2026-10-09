@@ -5,9 +5,15 @@
 
 ## Context
 
-`bucketMaxSpanSeconds` and `bucketRoundingSeconds` are fixed when the collection is
-created and cannot be changed afterwards. Getting them wrong means recreating the
-collection and rewriting the data.
+`bucketMaxSpanSeconds` and `bucketRoundingSeconds` are set when the collection is
+created. They can later be **increased** with `collMod`, never decreased (measured on
+MongoDB 9.0.4: 300 → 600 s accepted, 600 → 300 s refused with code 72; see
+`queries/feature_probes.py` and `LIMITATIONS.md`). Choosing a span that is too large
+therefore means recreating the collection and rewriting the data.
+
+> Correction 2026-10-09: the first version of this ADR said the parameters could not be
+> changed at all. The decision below does not depend on that: it is about which span
+> stores this workload best, measured before the code.
 
 The workload: a payment rail at ~75 events/s average, `meta` holding the route
 (`canal`, `provedor`, `produto`, `uf`) — around 2 900 distinct combinations.

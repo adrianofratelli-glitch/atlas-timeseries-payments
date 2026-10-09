@@ -89,6 +89,17 @@ Play (frontend)
         o bucket físico via find(rawData: true) em payment_events_live (MongoDB
         8.2+ bloqueia system.buckets.*; servidores antigos caem nesse namespace)
   → uPlot.setData() — o canvas nunca é recriado a cada poll
+
+Limpar / reiniciar (POST /api/live/clear, POST /api/demo/reset)
+  → LiveFeed.clear() sob o lock de ciclo de vida (o mesmo de start/stop)
+      1. sinaliza parada e avança a época sob o WriteGate: espera o insert_many
+         em voo; lote posterior da época antiga é descartado sem gravar
+      2. junta a thread do gerador (LIVE_CLEAR_JOIN_SECONDS, padrão 35 s)
+      3. ainda sob o portão: drop + create_collection(timeseries, TTL) + índices
+  → cada lote do gerador roda insert_idempotent(gate=...): sob o portão confere a
+    época e que a coleção é time series (ausente → recria; comum → recusa e para
+    com erro). Insert nunca cria coleção implícita.
+  → portão ocupado além de LIVE_GATE_TIMEOUT_SECONDS (20 s) → HTTP 409, nada apagado
 ```
 
 ## Decisões de design (por quê, não só o quê)
@@ -117,9 +128,10 @@ Play (frontend)
   evento que acorda o change stream acontecem na mesma transação ACID
   (`incidents.py:abrir`). Provedor marcado sem incidente correspondente é achado de
   auditoria.
-- **O change stream observa `incidents`, não `payment_events`** — a coleção time
-  series dispara por transação (dezenas por segundo); a coleção de incidentes
-  dispara uma vez por degradação real.
+- **O change stream observa `incidents`, não `payment_events`** — coleção time
+  series não suporta change stream (`watch()` falha com código 115, medido por
+  `queries/feature_probes.py`); a coleção de incidentes dispara uma vez por
+  degradação real.
 - **Ingestão ao vivo nunca toca `payment_events`.** Escreve em
   `payment_events_live`, TTL de 1 h, carimbada com tempo **real** (o relógio
   simulado só escolhe a forma do tráfego, ancorado no dia útil às 10h — carimbar o
@@ -168,8 +180,8 @@ POV_DEV=1 ./start.sh               # HMR + uvicorn --reload
 ```
 
 O gerador é idempotente via `det_id(kind, *parts)` (`uuid5` sobre os atributos
-chave) em tudo, exceto nos eventos: time series não tem `_id` controlável pelo
-usuário, logo não tem upsert. Recarregar eventos exige `--drop`; uma carga
+chave) em tudo, exceto nos eventos: time series aceita `_id` explícito, mas não o
+trata como único e recusa `upsert` (medido em `queries/feature_probes.py`). Recarregar eventos exige `--drop`; uma carga
 interrompida é retomada com `--resume` a partir do checkpoint diário em
 `dataset_info` (`days_done`, `day_events`, janela planejada): dias confirmados são
 pulados e o dia parcial é apagado e regravado.

@@ -70,9 +70,15 @@ wrong decline rates in more than one monitoring system.
 
 ## Two constraints that shaped the code
 
-**No user-controlled `_id`, so no upsert.** The generator is idempotent everywhere
-except the events, where reloading means `--drop`.
+**No upsert and no unique `_id`.** An explicit `_id` is accepted, but it is not unique
+(a duplicate insert is accepted too) and `upsert: true` is refused. The generator is
+idempotent everywhere except the events, where reloading means `--drop` plus the
+per-day `--resume` checkpoint; the live feed reconciles retried batches by `_id`.
 
-**A time series collection cannot be renamed.** It is a view over `system.buckets.*`
-and `renameCollection` fails with `CommandNotSupportedOnView`. Any workflow that stages
-data under a temporary name and swaps it at the end has to be written differently here.
+**Change streams are not supported on the time series.** `watch()` on it fails with
+code 115, so alerts are driven by `incidents`.
+
+Both measured on MongoDB 9.0.4 by `queries/feature_probes.py`; the full list, with what
+was measured and what comes from the documentation, is in `LIMITATIONS.md`. An earlier
+version of this file said the collection could not be renamed; on 9.0.4
+`renameCollection` succeeds.

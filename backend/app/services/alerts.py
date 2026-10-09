@@ -1,8 +1,8 @@
 """Change stream em `incidents` virando SSE.
 
-Observa a coleção de incidentes, não a série. Um change stream sobre `payment_events`
-dispara por transação — dezenas por segundo, útil para pipeline, inútil para acordar
-uma tela.
+Observa a coleção de incidentes, não a série: coleção time series não suporta change
+stream (`watch()` nela falha com código 115, medido em `queries/feature_probes.py`), e
+a coleção de incidentes dispara uma vez por degradação real.
 
 Uma transação que abre um incidente produz mais de um evento; o hub coalesce por
 `incident_id` dentro de uma janela curta para que a tira de alertas mostre uma linha,

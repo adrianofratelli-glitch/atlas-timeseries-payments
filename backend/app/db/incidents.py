@@ -72,8 +72,8 @@ def abrir(provedor_id: str, canal: str, z_recusa: float, z_p99: float, janelas: 
                 # insert_many/insert_one injeta _id no dicionário original; devolver
                 # isso rende ObjectId não serializável e um 500 depois do commit.
                 d.incidents.insert_one(dict(doc), session=sessao)
-                # A marcação é o evento. O listener observa `incidents`, não a coleção
-                # time series: lá o change stream dispara por evento de pagamento.
+                # A marcação é o evento. O listener observa `incidents`: coleção time
+                # series não suporta change stream (código 115).
                 d.provedores.update_one(
                     {"provedor_id": provedor_id},
                     {"$set": {"last_event": {"kind": "incidente_aberto",
