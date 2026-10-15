@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Atualiza dependências compatíveis e pisos de segurança; alinha metadados de versão entre aplicação e frontend.
+
 ## 1.1.1 (2026-10-09)
 
 - Live clear no longer races the writer: start/stop/clear share a lifecycle lock, a write gate with an epoch makes clear wait for the in-flight batch and discard any later batch of the old session, the writer thread is joined, and `payment_events_live` is recreated as a time series with TTL and indexes before writes resume. A late insert can no longer recreate it as a plain collection. A concurrent start + clear no longer answers HTTP 500 (`cannot join thread before it is started`). Clear answers `409` instead of a false "cleared" when an in-flight write does not finish in time.
