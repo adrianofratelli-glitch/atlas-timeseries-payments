@@ -1,6 +1,6 @@
 # Mapa do código — atlas-timeseries-payments
 
-> Também conhecida como: **Time Series pagamentos** (pasta antiga `atlas-timeseries-payments`). Portas: frontend **5400** / backend **8400**. Em uma frase: mostra o MongoDB gravando e agregando uma coleção time series (PIX + cartão + TED) enquanto ela nasce, com o bucket físico e o pipeline executado visíveis na tela.
+> Também conhecida como: **Time Series pagamentos** (pasta antiga `atlas-timeseries-pagamentos`). Portas: frontend **5400** / backend **8400**. Em uma frase: mostra o MongoDB gravando e agregando uma coleção time series (PIX + cartão + TED) enquanto ela nasce, com o bucket físico e o pipeline executado visíveis na tela.
 
 Atalhos: [architecture](briefing/architecture.md) · [queries](briefing/queries.md) · [ui-flows](briefing/ui-flows.md). Este mapa só aponta arquivo e linha.
 
