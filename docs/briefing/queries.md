@@ -1,5 +1,7 @@
 # Queries, pipelines e índices — atlas-timeseries-payments
 
+> Números de linha podem ficar defasados após mudanças: a fonte atualizada é [MAPA_DO_CODIGO.md](../MAPA_DO_CODIGO.md).
+
 Referência rápida para "onde está a query X" e "por que esse índice existe". Todo
 trecho abaixo é código real do repositório, com arquivo:linha. Nenhum dado real ou
 sensível — tudo é sintético.
@@ -347,7 +349,7 @@ provedores em 24h não cabe no orçamento de `MAX_TIME_MS`.
 
 Onde é chamada: `ranking()`, exposta em `GET /api/ranking?hours=&limit=`.
 
-### 8. Overview da ingestão ao vivo — `backend/app/db/live.py:85-124`
+### 8. Overview da ingestão ao vivo — `backend/app/db/live.py:111-156`
 
 O que faz: agrega os eventos de `payment_events_live` em bins de 1 segundo, sobre
 os últimos 60s, e devolve junto a configuração real da coleção e o bucket físico

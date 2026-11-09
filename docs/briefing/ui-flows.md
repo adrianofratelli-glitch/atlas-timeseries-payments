@@ -1,5 +1,7 @@
 # Interface e fluxos — atlas-timeseries-payments
 
+> Números de linha podem ficar defasados após mudanças: a fonte atualizada é [MAPA_DO_CODIGO.md](../MAPA_DO_CODIGO.md).
+
 A interface de palco hoje é **uma tela, uma ação, uma tese**: provar que o
 MongoDB Atlas grava e agrega uma série temporal enquanto ela nasce. Provedores,
 detecção, incidentes, velocity, ranking e comparação de armazenamento continuam
@@ -10,7 +12,7 @@ palco (arquivada — ver seção final).
 
 | Arquivo | Papel |
 |---|---|
-| `frontend/src/App.jsx` (408 linhas) | tela única: estado, polling, layout completo |
+| `frontend/src/App.jsx` (436 linhas) | tela única: estado, polling, layout completo |
 | `frontend/src/Chart.jsx` (164 linhas) | wrapper de `uPlot`; modos declarativos por tipo de série |
 | `frontend/src/QueryDetails.jsx` (15 linhas) | gaveta `<details>` com o pipeline executado |
 | `frontend/src/api.js` | client HTTP fino para o backend |
@@ -47,13 +49,13 @@ ingestão permanece horizontal dentro do próprio contêiner, as métricas viram
 
 ## Fluxo único: Iniciar ingestão
 
-Handler: `alternarIngestao()`, `frontend/src/App.jsx:149-169`.
+Handler: `alternarIngestao()`, `frontend/src/App.jsx:172`.
 
 1. Usuário clica **Iniciar ingestão** (único botão visível na tela).
 2. Frontend chama `POST /api/live/start` (`api.liveStart()`), zera o `overview`
    local (a curva sempre recomeça vazia, sem apagar dado anterior — a retenção
    continua sendo só o TTL).
-3. Backend (`live_start` em `main.py:244-246`) delega para
+3. Backend (`live_start` em `main.py:256`) delega para
    `services/live.py: LiveFeed.start()`, que sobe uma thread `live-feed` gerando
    PIX + cartão + TED no mesmo lote.
 4. Frontend entra em polling de 1s (`useEffect` em `App.jsx:137-147`) chamando
