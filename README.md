@@ -1,5 +1,7 @@
 # Payment rail telemetry on MongoDB Atlas time series
 
+Mapa do código: [docs/MAPA_DO_CODIGO.md](docs/MAPA_DO_CODIGO.md)
+
 A visual, measurable proof that MongoDB Atlas can receive payment events in a native
 time series collection and aggregate the series while it is still being written.
 
