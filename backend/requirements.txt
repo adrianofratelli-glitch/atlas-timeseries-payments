@@ -1,5 +1,5 @@
 fastapi>=0.115
-uvicorn[standard]>=0.32
+uvicorn[standard]>=0.54.0
 pymongo>=4.18.3,<5
 python-dotenv>=1.0
 pydantic>=2.9
