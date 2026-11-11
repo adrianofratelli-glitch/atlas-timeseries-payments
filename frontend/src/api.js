@@ -21,7 +21,8 @@ const BASE = import.meta.env.VITE_API ?? 'http://127.0.0.1:8400'
 
 async function get(path, params) {
   return boundedRequest(async (signal) => {
-    const url = new URL(BASE + path)
+    // Base relativa (VITE_API vazio, imagem Docker) resolve contra a origem da página.
+    const url = new URL(BASE + path, globalThis.location?.origin)
     Object.entries(params ?? {}).forEach(([k, v]) => {
       if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v)
     })

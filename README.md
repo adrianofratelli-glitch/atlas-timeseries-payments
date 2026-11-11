@@ -313,6 +313,23 @@ MONGODB_DB=trilho_pagamentos_test ./start.sh      # same app against the test da
 - API: `http://127.0.0.1:8400`
 - UI: `http://127.0.0.1:5400`
 
+## Docker
+
+One container: nginx serves the built UI on port 8080 and proxies `/api` and `/health` (including the
+`/api/alerts/stream` SSE feed) to the FastAPI backend, which runs with a single worker on `127.0.0.1:8000`.
+The UI is built with an empty `VITE_API`, so it calls the API on its own origin.
+
+```bash
+docker build -t atlas-timeseries-payments .
+docker run --env-file .env.docker -p 8080:8080 atlas-timeseries-payments
+curl -fsS http://127.0.0.1:8080/health      # database, event count, change stream state
+```
+
+`docker run --env-file` does not strip quotes: write `KEY=value` with no quotes in the file you
+pass (a quoted `MONGODB_URI` reaches the driver with the quotes and fails). No `.env` and no secret go into
+the image; everything is read from the environment at runtime.
+Loading the historical series stays outside the image (`scripts/reset_demo.py`).
+
 ## Verification
 
 Everything that writes runs against a `*_test` database. Start the API with
