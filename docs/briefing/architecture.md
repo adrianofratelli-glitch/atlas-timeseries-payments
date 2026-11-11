@@ -136,6 +136,13 @@ Limpar / reiniciar (POST /api/live/clear, POST /api/demo/reset)
   `payment_events_live`, TTL de 1 h, carimbada com tempo **real** (o relógio
   simulado só escolhe a forma do tráfego, ancorado no dia útil às 10h — carimbar o
   passado faria a TTL apagar a série em menos de um minuto).
+- **Um único processo de ingestão ao vivo para o trilho completo.** PIX, cartão e
+  TED entram no mesmo lote; canal é dimensão do evento e filtro de análise, nunca um
+  seletor de pipeline.
+- **Modo ao vivo não calcula z-score.** A série é curta demais para aprender a
+  própria linha de base, então o payload expõe `delta_ratio_recusa` /
+  `delta_ratio_recusa_max` e `p99_score_indisponivel`, em vez de um nome que
+  sugeriria z-score.
 - **Concorrência é limitada por classe de consulta** (`app/services/limits.py`):
   12 slots para o caminho interativo, 3 para o analítico, 2 para `$collStats`.
   Quem não consegue vaga em 750 ms recebe `429` — um sistema sob saturação que
