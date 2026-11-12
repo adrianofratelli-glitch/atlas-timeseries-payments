@@ -1,6 +1,6 @@
 # Payment rail telemetry on MongoDB Atlas time series
 
-Mapa do código: [docs/MAPA_DO_CODIGO.md](docs/MAPA_DO_CODIGO.md)
+Code map (pt-BR): [docs/MAPA_DO_CODIGO.md](docs/MAPA_DO_CODIGO.md)
 
 A visual, measurable proof that MongoDB Atlas can receive payment events in a native
 time series collection and aggregate the series while it is still being written.
@@ -90,9 +90,24 @@ time and aggregation pipeline used by the visible chart — not a pre-recorded e
 ![Executed MongoDB aggregation pipeline grouping confirmed measurements into one-second windows](docs/screenshots/10-pipeline-executado.png)
 
 The pipeline filters the current 60-second session, groups measurements with
-`$dateTrunc`, sums events and value, sorts the completed seconds and returns at most 60
-points. The current second is excluded because it is still being written; including it
-would create a false throughput drop at the end of the line.
+`$dateTrunc`, sums events and value, sorts the completed seconds by the group key and
+returns at most 60 points. The current second is excluded because it is still being
+written; including it would create a false throughput drop at the end of the line.
+
+Opening the drawer also asks the server for its execution plan (`GET /api/live/plan`,
+an `explain` at `queryPlanner` verbosity — planned, not executed — cached for 60 s) and
+prints the engine and the block-processing stages it chose. On MongoDB 9.0.7 the chart
+pipeline runs in the slot-based engine with block processing (`ts_bucket_to_cellblock`,
+`block_group`, `block_to_row`). The pipeline sorts on `_id` and renames last because the
+earlier shape — `$set: {ts: "$_id"}` followed by `$sort: {ts: 1}` — sent the whole
+aggregation to the classic engine; [ADR 0003](docs/adr/0003-block-processing.md) has the
+measurement.
+
+If the writer fails (an unseeded database, a collection that exists as a plain
+collection, a persistent network error), Play answers `409` with the reason and the
+screen shows it in a banner instead of silently returning to "Iniciar". The batch card
+also shows the network round trip the driver measures, because that is the floor of every
+batch acknowledgement on screen.
 
 ## Architecture
 
@@ -347,7 +362,8 @@ Everything that writes runs against a `*_test` database. Start the API with
 ```bash
 python3 -m compileall -q backend tests scripts data-generator queries
 (cd frontend && npm run build && node --test tests/*.test.mjs)
-backend/venv/bin/python -m unittest tests/test_cors.py tests/test_client_concurrency.py
+# offline, also in CI: idempotent insert, write gate, executed pipeline, plan summary, feed error state
+backend/venv/bin/python -m unittest tests/test_cors.py tests/test_client_concurrency.py tests/test_offline_core.py
 
 # live feed lifecycle against the cluster (slow writer during clear, start/clear race);
 # uses and drops trilho_lifecycle_test
@@ -362,6 +378,8 @@ backend/venv/bin/python -m unittest tests/test_live_lifecycle.py -v
 .venv/bin/python tests/test_resilience.py          # refuses a non-*_test API
 .venv/bin/python tests/stress.py --out /tmp/stress.json
 .venv/bin/python queries/bench.py --runs 20 --db trilho_pagamentos_test --out /tmp/bench.json
+# chart pipeline, previous vs current shape: engine, block stages, latency, same output (ADR 0003)
+.venv/bin/python queries/block_processing.py --runs 15 --out /tmp/block.json
 ```
 
 `--out` keeps the versioned full-scale results in `queries/` and `tests/` untouched when
@@ -371,6 +389,8 @@ With the application already running, reproduce the bounded live-capacity ramp:
 
 ```bash
 python3 tests/live_ingest_capacity.py --duration 12
+# sustained: one 10-minute stage at the stage rate, sliced per minute, with drift verdict
+python3 tests/live_ingest_capacity.py --hold 600
 ```
 
 The ramp writes synthetic events to `payment_events_live` and stops automatically when

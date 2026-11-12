@@ -82,6 +82,7 @@ export const api = {
   liveStop: () => post('/api/live/stop'),
   liveStatus: () => get('/api/live/status'),
   liveOverview: () => get('/api/live/overview'),
+  livePlan: () => get('/api/live/plan'),
   liveHealth: (id) => get(`/api/live/health/${id}`),
   stream: () => new EventSource(`${BASE}/api/alerts/stream`),
 }

@@ -13,6 +13,7 @@ import time
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -254,7 +255,14 @@ class LiveDegrade(BaseModel):
 
 @app.post("/api/live/start")
 def live_start(body: LiveStart):
-    return feed.start(body.eps)
+    status = feed.start(body.eps)
+    # O escritor falhou antes do primeiro lote (banco sem carga, coleção inválida):
+    # 200 com estado "erro" deixava o botão voltar a "Iniciar" sem explicação.
+    if status["state"] == "erro":
+        raise HTTPException(status_code=409, detail={
+            "reason": status["last_error"] or "ingestão ao vivo falhou ao iniciar",
+            "feed": jsonable_encoder(status)})
+    return status
 
 
 @app.post("/api/live/degrade")
@@ -292,6 +300,12 @@ def live_overview():
     )
     payload["feed"] = feed_snapshot
     return payload
+
+
+@app.get("/api/live/plan")
+def live_plan():
+    """Plano de execução do pipeline do gráfico (block processing visível, ADR 0003)."""
+    return _timed(live_db.plano, "analitico")
 
 
 @app.get("/api/live/health/{provedor_id}")

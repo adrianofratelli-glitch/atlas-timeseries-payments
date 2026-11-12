@@ -1,0 +1,93 @@
+{
+  "measured_at": "2026-11-12T23:02:06.959573+00:00",
+  "server_version": "9.0.7",
+  "namespace": "trilho_pagamentos_test.payment_events",
+  "network_floor_ms": {
+    "p50": 310.0,
+    "p95": 312.8,
+    "min": 308.2
+  },
+  "windows": [
+    {
+      "hours": 1.0,
+      "anterior": {
+        "engine": "classic",
+        "block_stages": [],
+        "latency_ms": {
+          "p50": 1071.9,
+          "p95": 1257.6,
+          "min": 649.2
+        }
+      },
+      "atual": {
+        "engine": "sbe",
+        "block_stages": [
+          "block_to_row",
+          "block_group",
+          "ts_bucket_to_cellblock"
+        ],
+        "latency_ms": {
+          "p50": 655.3,
+          "p95": 822.6,
+          "min": 536.5
+        }
+      },
+      "same_output": true,
+      "p50_ratio": 1.64
+    },
+    {
+      "hours": 24.0,
+      "anterior": {
+        "engine": "classic",
+        "block_stages": [],
+        "latency_ms": {
+          "p50": 7175.1,
+          "p95": 12561.3,
+          "min": 5380.8
+        }
+      },
+      "atual": {
+        "engine": "sbe",
+        "block_stages": [
+          "block_to_row",
+          "block_group",
+          "ts_bucket_to_cellblock"
+        ],
+        "latency_ms": {
+          "p50": 4153.0,
+          "p95": 4605.2,
+          "min": 3927.6
+        }
+      },
+      "same_output": true,
+      "p50_ratio": 1.73
+    },
+    {
+      "hours": 72.0,
+      "anterior": {
+        "engine": "classic",
+        "block_stages": [],
+        "latency_ms": {
+          "p50": 28460.8,
+          "p95": 30496.4,
+          "min": 16593.7
+        }
+      },
+      "atual": {
+        "engine": "sbe",
+        "block_stages": [
+          "block_to_row",
+          "block_group",
+          "ts_bucket_to_cellblock"
+        ],
+        "latency_ms": {
+          "p50": 23424.9,
+          "p95": 29241.6,
+          "min": 20636.0
+        }
+      },
+      "same_output": true,
+      "p50_ratio": 1.21
+    }
+  ]
+}

@@ -18,13 +18,22 @@ questions, and this demo does not answer them.
 
 **Ingestion at a bank's real peak.** The generator loads in bulk from one host and the
 measured ceiling on this cluster is in `queries/benchmarks.md`. There is no Kafka, no
-back-pressure story, and no sustained-ingest test at production rates. A bank asking
+back-pressure story, and no sustained-ingest test at production rates. What *is* measured
+is stability at the stage rate: `tests/live_ingest_capacity.py --hold` runs one long stage
+sliced per minute and reports whether the confirmed rate and the query p95 drift as the
+collection grows (`queries/benchmarks.md`). Atlas Stream Processing (Kafka source,
+windowed `$merge` into a time series) is the managed answer to the back-pressure question
+and is not deployed here. A bank asking
 "can it take our peak PIX second" is asking a question this repository does not answer —
 the honest response is a sizing exercise on a dedicated cluster, not this demo.
 
-**Sharding.** The collection is unsharded. Sharding a time series collection is
-supported and has real constraints on the shard key, and none of that is exercised here.
-Anything said about behaviour beyond a single replica set is opinion.
+**Sharding.** The collection is unsharded, and the shared M20 cannot shard (sharded
+clusters start at M30). Sharding a time series collection is supported and has real
+constraints, none of them exercised here. What the documentation says today, to be
+re-checked before repeating it: since 8.0 a shard key on the `timeField` is deprecated —
+shard on the `metaField` (here the route, hashed or ranged); resharding a time series
+collection requires 8.0.10+ on every shard; zone sharding is not supported. Anything said
+about behaviour beyond a single replica set is opinion.
 
 **A competitive benchmark.** No InfluxDB, no TimescaleDB, no ClickHouse, no Prometheus
 ran beside this. The storage comparison is MongoDB against MongoDB — a time series
@@ -112,7 +121,11 @@ whatever else was resident. That makes them conservative rather than flattering.
 same run as every latency. Any query reported near that number is measuring the round
 trip, not the database. An earlier round of measurements ran over a VPN and reported
 8.5 ms — *lower* — which is why the floor is printed alongside the results rather than
-assumed.
+assumed. On 2026-11-12 the same host measured **~310 ms** (`ping`) and ~460 ms (driver
+heartbeat RTT); the live writer, which sends one batch per tick, confirmed ~1,050 events/s
+instead of 2,281/s because each batch waited on that round trip. That is the network, not
+the cluster — and it is why the batch card now prints the round trip next to the
+acknowledgement time.
 
 **The live ingestion is a demonstration device.** A single background thread inside the
 API writes one mixed batch of PIX, card and TED events per tick from the same synthetic

@@ -49,23 +49,23 @@ ingestão permanece horizontal dentro do próprio contêiner, as métricas viram
 
 ## Fluxo único: Iniciar ingestão
 
-Handler: `alternarIngestao()`, `frontend/src/App.jsx:172`.
+Handler: `alternarIngestao()`, `frontend/src/App.jsx:133`.
 
 1. Usuário clica **Iniciar ingestão** (único botão visível na tela).
 2. Frontend chama `POST /api/live/start` (`api.liveStart()`), zera o `overview`
    local (a curva sempre recomeça vazia, sem apagar dado anterior — a retenção
    continua sendo só o TTL).
-3. Backend (`live_start` em `main.py:256`) delega para
+3. Backend (`live_start` em `main.py:257`) delega para
    `services/live.py: LiveFeed.start()`, que sobe uma thread `live-feed` gerando
    PIX + cartão + TED no mesmo lote.
-4. Frontend entra em polling de 1s (`useEffect` em `App.jsx:137-147`) chamando
+4. Frontend entra em polling de 1s (`useEffect` em `App.jsx:98-108`) chamando
    `GET /api/live/overview` enquanto `live.state === 'rodando'`.
 5. Cada resposta atualiza:
-   - **Trilho de ingestão** (`ingestion-flow`, `App.jsx:220-252`): pacotes `{ }`
+   - **Trilho de ingestão** (`ingestion-flow`, `App.jsx:181-218`): pacotes `{ }`
      animados fluindo do "gerador" até a "pilha de buckets por rota"; a animação
      só se move enquanto o feed está rodando, e o número do lote só é publicado
      depois que `insert_many` retorna.
-   - **Métricas de prova** (`proof-metrics`, `App.jsx:254-277`): eventos nesta
+   - **Métricas de prova** (`proof-metrics`, `App.jsx:220-243`): eventos nesta
      execução, throughput observado, tempo de confirmação do lote (`insert_many`),
      tempo de agregação no Atlas.
    - **Gráfico** (`chart-panel`, modo `throughput_live` no `Chart.jsx`): janela
@@ -78,17 +78,26 @@ Handler: `alternarIngestao()`, `frontend/src/App.jsx:172`.
      lote, sem `_id`.
 6. Usuário clica **Parar ingestão** → `POST /api/live/stop`, o polling para.
 
+Falha do escritor: se o feed termina em `state: "erro"` (banco sem provedores, coleção
+que existe como não time series, erro de rede persistente), `POST /api/live/start`
+responde 409 com o motivo e a tela mostra o banner "Ingestão ao vivo parou: …"
+(`evidence.js::falhaDaIngestao`). Antes, o botão só voltava a "Iniciar" sem explicação.
+O card "Confirmação do lote" mostra também o piso de rede (`network_rtt_ms`, RTT que o
+driver mede nos heartbeats): com centenas de ms de ida e volta, um lote lento é rede.
+
 ### Gaveta de transparência técnica
 
 `QueryDetails.jsx` renderiza, fechada por padrão, o pipeline de agregação
 exatamente como foi executado (`JSON.stringify(pipeline, null, 2)`), junto com
 namespace e tempo de resposta medido no servidor. É a mesma pipeline #8 descrita
 em `queries.md` (`db/live.py: overview()`), devolvida verbatim — o arquiteto do
-cliente lê exatamente o que rodou, não uma versão editada para a demo.
+cliente lê exatamente o que rodou, não uma versão editada para a demo. Ao abrir, a
+gaveta pede `GET /api/live/plan` e mostra uma linha com a versão do servidor, o motor e,
+quando houver, os estágios de block processing (`evidence.js::resumoDoPlano`).
 
 ### Bloco de bucketização (benchmark, não ao vivo)
 
-`bucketization-result` (`App.jsx:279-294`) é deliberadamente **não** telemetria em
+`bucketization-result` (`App.jsx:245-260`) é deliberadamente **não** telemetria em
 tempo real — é rotulado como "benchmark medido · mesmo schema · não é esta
 execução ao vivo" e reproduz um resultado histórico versionado
 (`queries/bench-results.json` e `queries/benchmarks.md`): 44.733.964 medições,
@@ -97,7 +106,7 @@ menos armazenamento total por evento incluindo índices.
 
 ### Integridade da evidência
 
-Nota fixa no rodapé do rail (`integrity-note`, `App.jsx:392-396`): "o movimento
+Nota fixa no rodapé do rail (`integrity-note`, `App.jsx:362-366`): "o movimento
 representa apenas lotes confirmados... são números desta execução, não um
 benchmark de capacidade." Nenhum número na tela é hard-coded como resultado de
 sucesso — bucket e config de coleção vêm de `listCollections` e de
@@ -107,7 +116,7 @@ assim que a medição chega; até lá mostra o benchmark histórico, rotulado co
 
 ### Fallback de API anterior
 
-`fallbackAnterior()` (`App.jsx:76-99`) detecta quando o backend responde 404 em
+`fallbackAnterior()` (`App.jsx:37-60`) detecta quando o backend responde 404 em
 `/api/live/overview` (versão de API anterior à unificação de canais) e mostra um
 aviso (`legacy-note`) pedindo reinício pelo portal — a interface nunca finge que
 uma resposta antiga é dado real.

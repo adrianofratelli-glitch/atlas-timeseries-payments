@@ -349,7 +349,7 @@ provedores em 24h não cabe no orçamento de `MAX_TIME_MS`.
 
 Onde é chamada: `ranking()`, exposta em `GET /api/ranking?hours=&limit=`.
 
-### 8. Overview da ingestão ao vivo — `backend/app/db/live.py:111-156`
+### 8. Overview da ingestão ao vivo — `backend/app/db/live.py:112-165`
 
 O que faz: agrega os eventos de `payment_events_live` em bins de 1 segundo, sobre
 os últimos 60s, e devolve junto a configuração real da coleção e o bucket físico
@@ -363,16 +363,27 @@ pipe = [
     {"$match": {"ts": {"$gte": start, "$lt": end}}},
     {"$group": {"_id": {"$dateTrunc": {"date": "$ts", "unit": "second"}},
                 "eventos": {"$sum": 1}, "volume": {"$sum": "$valor"}}},
-    {"$set": {"ts": "$_id"}},
-    {"$sort": {"ts": 1}},
-    ...
+    {"$sort": {"_id": 1}},          # chave do $group, não campo derivado
+    {"$limit": 60},
+    {"$project": {"_id": 0, "ts": "$_id", "eventos": 1,
+                  "volume": {"$round": ["$volume", 2]}}},
 ]
 ```
+
+Por que ordena por `_id` e só renomeia no fim: medido no 9.0.7 (`queries/block_processing.py`,
+ADR 0003), a forma anterior — `$set: {ts: "$_id"}` seguido de `$sort: {ts: 1}` — mandava o
+pipeline inteiro para o motor clássico, sem block processing. A forma atual mantém o SBE com
+os estágios `ts_bucket_to_cellblock`, `block_group` e `block_to_row`, com a mesma saída.
+
+Plano de execução (`live.py::plano`, `GET /api/live/plan`): `explain` com
+`verbosity: "queryPlanner"` (planeja sem executar) do mesmo pipeline para a janela atual,
+cache de 60 s, resumido por `live.py::resumir_plano` em motor (`sbe`/`classic`), estágios
+de bloco e versão do servidor. A gaveta da query o pede só ao abrir.
 
 Por que exclui o segundo corrente: ele ainda está sendo escrito — exibi-lo cria
 uma queda falsa no último ponto que desaparece no poll seguinte.
 
-Config real da coleção (`live.py:14-35`), via `listCollections`, cache de 30s:
+Config real da coleção (`backend/app/db/live.py:20-43`), via `listCollections`, cache de 30s:
 
 ```python
 result = with_retry(lambda: db().command("listCollections", filter={"name": COLLECTION}))

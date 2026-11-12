@@ -31,6 +31,20 @@ def db():
     return client()[MONGODB_DB]
 
 
+def rtt_ms() -> float | None:
+    """Ida e volta até o primário, medida pelo driver nos heartbeats (sem comando extra).
+
+    É o piso de qualquer latência que a tela mostra: com 300 ms de rede, um lote de
+    2.500 documentos confirmado em 2 s é rede, não Atlas.
+    """
+    if _client is None:
+        return None
+    for server in _client.topology_description.server_descriptions().values():
+        if server.server_type_name == "RSPrimary" and server.round_trip_time is not None:
+            return round(server.round_trip_time * 1000, 1)
+    return None
+
+
 def with_retry(fn: Callable[[], T], attempts: int = 3) -> T:
     """Só falha transitória de rede é repetida.
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -124,23 +125,7 @@ def overview(session_started_at: datetime | None = None,
     # Uma nova execução começa uma curva nova sem apagar dado. O TTL continua
     # responsável pela retenção, como seria numa operação real.
     start = max(window_start, session_started_at) if session_started_at else window_start
-    pipe = [
-        {"$match": {"ts": {"$gte": start, "$lt": end}}},
-        {"$group": {
-            "_id": {"$dateTrunc": {"date": "$ts", "unit": "second"}},
-            "eventos": {"$sum": 1},
-            "volume": {"$sum": "$valor"},
-        }},
-        {"$set": {"ts": "$_id"}},
-        {"$sort": {"ts": 1}},
-        {"$project": {
-            "_id": 0,
-            "ts": 1,
-            "eventos": 1,
-            "volume": {"$round": ["$volume", 2]},
-        }},
-        {"$limit": min(MAX_POINTS, 60)},
-    ]
+    pipe = _pipeline(start, end)
     points = with_retry(lambda: list(
         db()[COLLECTION].aggregate(pipe, maxTimeMS=MAX_TIME_MS)))
     return {
@@ -154,3 +139,109 @@ def overview(session_started_at: datetime | None = None,
         "bucket": _bucket_snapshot(last_document),
         "pipeline": pipe,
     }
+
+
+def _pipeline(start: datetime, end: datetime) -> list[dict]:
+    """O pipeline do gráfico: o mesmo que roda, que a gaveta mostra e que o explain lê."""
+    return [
+        {"$match": {"ts": {"$gte": start, "$lt": end}}},
+        {"$group": {
+            "_id": {"$dateTrunc": {"date": "$ts", "unit": "second"}},
+            "eventos": {"$sum": 1},
+            "volume": {"$sum": "$valor"},
+        }},
+        # Ordena pela chave do `$group` e só depois renomeia. Medido no 9.0.7
+        # (queries/block_processing.py, ADR 0003): `$set ts` seguido de `$sort ts`
+        # tirava a agregação inteira do motor SBE e, com ela, o block processing.
+        {"$sort": {"_id": 1}},
+        {"$limit": min(MAX_POINTS, 60)},
+        {"$project": {
+            "_id": 0,
+            "ts": "$_id",
+            "eventos": 1,
+            "volume": {"$round": ["$volume", 2]},
+        }},
+    ]
+
+
+# --------------------------------------------------------------- plano de execução
+_PLANO_CACHE: tuple[float, dict | None] = (0.0, None)
+PLANO_CACHE_SECONDS = 60.0
+
+
+def _estagios(no, saida: list[str]) -> list[str]:
+    """Todos os valores de `stage` do explain, em ordem de aparição, sem repetir."""
+    if isinstance(no, dict):
+        estagio = no.get("stage")
+        if isinstance(estagio, str) and estagio not in saida:
+            saida.append(estagio)
+        for valor in no.values():
+            _estagios(valor, saida)
+    elif isinstance(no, list):
+        for item in no:
+            _estagios(item, saida)
+    return saida
+
+
+_ESTAGIO_BLOCO = re.compile(r"\b(ts_bucket_to_cellblock|block_[a-z_]+)\b")
+
+
+def _planos_sbe(no, saida: list[str]) -> list[str]:
+    """Textos de `slotBasedPlan.stages` em qualquer nível do explain."""
+    if isinstance(no, dict):
+        sbp = no.get("slotBasedPlan")
+        if isinstance(sbp, dict):
+            saida.append(str(sbp.get("stages", "")))
+        for valor in no.values():
+            _planos_sbe(valor, saida)
+    elif isinstance(no, list):
+        for item in no:
+            _planos_sbe(item, saida)
+    return saida
+
+
+def resumir_plano(explain: dict) -> dict:
+    """Reduz o explain ao que a gaveta mostra: motor, block processing e estágios.
+
+    Block processing (8.0+) aparece como estágios do plano SBE com `block` no nome
+    (`ts_bucket_to_cellblock`, `block_group`, `block_to_row`). Sem eles a consulta
+    roda linha a linha — e a tela diz isso em vez de presumir o ganho.
+    """
+    estagios = _estagios(explain.get("queryPlanner", explain), [])
+    planos_sbe = _planos_sbe(explain, [])
+    # Com verbosity queryPlanner os estágios SBE vêm como texto em
+    # `slotBasedPlan.stages`; com executionStats, também como chaves `stage`.
+    blocos = [e for e in estagios if "block" in e.lower()]
+    for texto in planos_sbe:
+        for nome in _ESTAGIO_BLOCO.findall(texto):
+            if nome not in blocos:
+                blocos.append(nome)
+    sbe = bool(planos_sbe)
+    return {
+        "engine": "sbe" if sbe else "classic",
+        "block_processing": bool(blocos),
+        "block_stages": blocos,
+        "stages": estagios,
+        "server_version": (explain.get("serverInfo") or {}).get("version"),
+    }
+
+
+def plano() -> dict:
+    """`explain` (queryPlanner: planeja sem executar) do pipeline da janela atual.
+
+    Sob demanda e com cache: o plano não muda a cada segundo e um explain por poll
+    dobraria as idas ao cluster do caminho interativo.
+    """
+    global _PLANO_CACHE
+    agora = time.monotonic()
+    if _PLANO_CACHE[1] is not None and agora - _PLANO_CACHE[0] < PLANO_CACHE_SECONDS:
+        return {**_PLANO_CACHE[1], "cached": True}
+    end = datetime.now(timezone.utc).replace(microsecond=0)
+    pipe = _pipeline(end - timedelta(seconds=60), end)
+    explain = with_retry(lambda: db().command(
+        "explain", {"aggregate": COLLECTION, "pipeline": pipe, "cursor": {}},
+        verbosity="queryPlanner", maxTimeMS=MAX_TIME_MS))
+    resumo = {"namespace": f"{db().name}.{COLLECTION}", **resumir_plano(explain),
+              "verbosity": "queryPlanner"}
+    _PLANO_CACHE = (agora, resumo)
+    return {**resumo, "cached": False}

@@ -4,14 +4,9 @@ import Button from '@leafygreen-ui/button'
 import { api } from './api.js'
 import Chart from './Chart.jsx'
 import QueryDetails from './QueryDetails.jsx'
-
-function numero(valor, casas = 0) {
-  if (valor == null || Number.isNaN(valor)) return '—'
-  return valor.toLocaleString('pt-BR', {
-    minimumFractionDigits: casas,
-    maximumFractionDigits: casas,
-  })
-}
+import {
+  BUCKETIZATION_BENCHMARK, bucketizacaoMedida, documentoVisivel, falhaDaIngestao, numero,
+} from './evidence.js'
 
 function ms(valor) {
   return valor == null ? '—' : `${numero(valor, valor < 10 ? 1 : 0)} ms`
@@ -24,42 +19,7 @@ function hora(valor) {
   })
 }
 
-function documentoVisivel(documento) {
-  if (!documento) return null
-  return {
-    ts: documento.ts,
-    meta: documento.meta,
-    valor: documento.valor,
-    latencia_ms: documento.latencia_ms,
-    aprovado: documento.aprovado,
-  }
-}
-
 const PACOTES = Array.from({ length: 11 }, (_, index) => index)
-
-// Evidência reproduzível da carga histórica versionada em queries/. Só aparece
-// enquanto a medição do cluster conectado ($collStats via /api/storage) não chega,
-// e é rotulada como benchmark; os números e o método estão em queries/benchmarks.md.
-const BUCKETIZATION_BENCHMARK = Object.freeze({
-  events: 44_733_964,
-  buckets: 2_613_915,
-  eventsPerBucket: 17.1,
-  dataReduction: 2.26,
-  totalReduction: 3.73,
-})
-
-function bucketizacaoMedida(storage) {
-  const ts = storage?.timeseries
-  if (!storage?.available || !ts?.documents || !ts?.buckets) return null
-  return {
-    events: ts.documents,
-    buckets: ts.buckets,
-    eventsPerBucket: ts.documents / ts.buckets,
-    dataReduction: storage.storage_ratio,
-    totalReduction: storage.total_ratio,
-    measuredAt: new Date(Date.now() - (storage.measured_seconds_ago ?? 0) * 1000),
-  }
-}
 
 export default function App() {
   const [health, setHealth] = useState(null)
@@ -72,6 +32,7 @@ export default function App() {
   const backendAnteriorRef = useRef(false)
 
   const aoVivo = live?.state === 'rodando'
+  const falhaIngestao = falhaDaIngestao(live)
   const pontos = overview?.points ?? []
   const ultimoPonto = pontos.at(-1)
   const colecao = overview?.collection ?? {}
@@ -222,6 +183,11 @@ export default function App() {
           {erro} — verifique a API em {api.base}
         </Banner>
       )}
+      {!erro && falhaIngestao && (
+        <Banner variant="danger" className="erro">
+          Ingestão ao vivo parou: {falhaIngestao}
+        </Banner>
+      )}
 
       <main className="enterprise-shell" id="conteudo-principal" tabIndex={-1}>
         <section className="primary-proof" aria-live="polite">
@@ -294,6 +260,9 @@ export default function App() {
               <span>Confirmação do lote</span>
               <strong>{ms(prova.escrita)}</strong>
               <small>{numero(live?.last_tick_written)} documentos em <code>insert_many</code></small>
+              {live?.network_rtt_ms != null && (
+                <small>piso de rede: {ms(live.network_rtt_ms)} ida e volta</small>
+              )}
             </article>
             <article>
               <span>Agregação no Atlas</span>
@@ -341,7 +310,8 @@ export default function App() {
 
           <QueryDetails pipeline={overview?.pipeline}
                         namespace={namespaceLive}
-                        elapsedMs={overview?.elapsed_ms} />
+                        elapsedMs={overview?.elapsed_ms}
+                        loadPlan={api.livePlan} />
         </section>
 
         <aside className="evidence-rail">

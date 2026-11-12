@@ -35,7 +35,7 @@ from pymongo.errors import CollectionInvalid
 from ..config import (LIVE_CLEAR_JOIN_SECONDS, LIVE_GATE_TIMEOUT_SECONDS,
                       LIVE_MINUTES_PER_TICK, LIVE_TARGET_EPS, LIVE_TICK_SECONDS,
                       LIVE_TTL_SECONDS)
-from ..db.client import db, insert_idempotent
+from ..db.client import db, insert_idempotent, rtt_ms
 
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
@@ -270,6 +270,7 @@ class LiveFeed:
             "ttl_seconds": LIVE_TTL_SECONDS,
             "collection": COLLECTION,
             "last_error": self.last_error,
+            "network_rtt_ms": rtt_ms(),
         }
 
     # ------------------------------------------------------------------ execução
@@ -302,8 +303,11 @@ class LiveFeed:
             d = db()
             cadastrados = list(d.provedores.find({"canal": {"$in": list(self.canais)}}))
             if not cadastrados:
-                self.state = "parado"
-                self.last_error = "trilho sem provedores"
+                # "erro", não "parado": banco sem carga é falha que o apresentador
+                # precisa ver, e a rota de start a devolve como 409.
+                self.state = "erro"
+                self.last_error = ("trilho sem provedores: carregue o banco com "
+                                   "scripts/reset_demo.py")
                 return
             provedores = {
                 canal: [p for p in cadastrados if p["canal"] == canal]
@@ -311,7 +315,7 @@ class LiveFeed:
             }
             ausentes = [canal for canal, itens in provedores.items() if not itens]
             if ausentes:
-                self.state = "parado"
+                self.state = "erro"
                 self.last_error = f"canal sem provedores: {', '.join(ausentes)}"
                 return
             pesos = {}

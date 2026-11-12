@@ -3,6 +3,11 @@
 
 Não apaga dados. Cada estágio abre uma nova sessão lógica e os eventos expiram pelo
 TTL da própria coleção time series.
+
+`--hold SEGUNDOS` troca a rampa por um único estágio longo no ritmo do palco,
+fatiado por `--slice-seconds`: mede se a taxa confirmada e o p95 da consulta
+derivam enquanto a coleção cresce (ingestão sustentada, não pico). O RTT de rede
+que o driver mede vai junto, porque é o piso de cada lote.
 """
 from __future__ import annotations
 
@@ -47,16 +52,34 @@ def round_or_none(value: float | None) -> float | None:
     return None if value is None else round(value, 1)
 
 
+def _fatia(inicio: float, fim: float, escritos: int, consultas: list[float],
+           ticks: list[float], rtts: list[float]) -> dict:
+    return {
+        "seconds": round(fim - inicio, 1),
+        "confirmed_eps": round(escritos / max(fim - inicio, 0.001), 1),
+        "query_server_ms_p95": round_or_none(percentile(consultas, 0.95)),
+        "tick_ms_p95": round_or_none(percentile(ticks, 0.95)),
+        "network_rtt_ms_p50": round_or_none(percentile(rtts, 0.50)),
+    }
+
+
 def run_stage(base_url: str, requested_eps: int, duration: float,
-              poll_seconds: float) -> dict:
+              poll_seconds: float, slice_seconds: float | None = None) -> dict:
     start, start_http_ms = request(base_url, "/api/live/start", {"eps": requested_eps})
     seen_tick = -1
     tick_durations: list[float] = []
     tick_sizes: list[float] = []
     query_server: list[float] = []
     query_http: list[float] = []
+    rtts: list[float] = []
     errors: list[str] = []
     last = start
+    slices: list[dict] = []
+    slice_start = time.monotonic()
+    slice_written = int(start.get("written", 0))
+    slice_queries: list[float] = []
+    slice_ticks: list[float] = []
+    slice_rtts: list[float] = []
     deadline = time.monotonic() + duration
 
     while time.monotonic() < deadline:
@@ -68,12 +91,24 @@ def run_stage(base_url: str, requested_eps: int, duration: float,
 
         last = overview["feed"]
         query_server.append(float(overview.get("elapsed_ms", 0.0)))
+        slice_queries.append(query_server[-1])
         query_http.append(http_ms)
+        if last.get("network_rtt_ms") is not None:
+            rtts.append(float(last["network_rtt_ms"]))
+            slice_rtts.append(rtts[-1])
         tick = int(last.get("ticks", 0))
         if tick != seen_tick:
             seen_tick = tick
             tick_durations.append(float(last.get("last_tick_duration_ms", 0.0)))
+            slice_ticks.append(tick_durations[-1])
             tick_sizes.append(float(last.get("last_tick_written", 0.0)))
+        agora = time.monotonic()
+        if slice_seconds and agora - slice_start >= slice_seconds:
+            escrito = int(last.get("written", 0))
+            slices.append(_fatia(slice_start, agora, escrito - slice_written,
+                                 slice_queries, slice_ticks, slice_rtts))
+            slice_start, slice_written = agora, escrito
+            slice_queries, slice_ticks, slice_rtts = [], [], []
         if last.get("state") == "erro" or last.get("last_error"):
             errors.append(last.get("last_error") or "feed em estado de erro")
             break
@@ -103,8 +138,35 @@ def run_stage(base_url: str, requested_eps: int, duration: float,
         "query_http_ms_p95": round_or_none(percentile(query_http, 0.95)),
         "start_http_ms": round(start_http_ms, 1),
         "stop_http_ms": round(stop_http_ms, 1),
+        "network_rtt_ms_p50": round_or_none(percentile(rtts, 0.50)),
         "state": final["state"],
         "errors": errors,
+        **({"slices": slices, "drift": deriva(slices)} if slice_seconds else {}),
+    }
+
+
+def deriva(slices: list[dict]) -> dict | None:
+    """Último contra primeiro minuto: taxa (razão) e p95 da consulta (razão).
+
+    Exclui a primeira fatia se houver três ou mais: ela inclui o aquecimento do
+    feed (primeiro lote, criação de buckets).
+    """
+    uteis = slices[1:] if len(slices) >= 3 else slices
+    if len(uteis) < 2:
+        return None
+    primeira, ultima = uteis[0], uteis[-1]
+    taxas = [f["confirmed_eps"] for f in uteis]
+
+    def razao(a, b):
+        return round(b / a, 2) if a and b is not None else None
+
+    return {
+        "slices_compared": len(uteis),
+        "rate_last_over_first": razao(primeira["confirmed_eps"], ultima["confirmed_eps"]),
+        "rate_cv_pct": round(statistics.pstdev(taxas) / statistics.mean(taxas) * 100, 1)
+        if statistics.mean(taxas) else None,
+        "query_p95_last_over_first": razao(primeira["query_server_ms_p95"],
+                                           ultima["query_server_ms_p95"]),
     }
 
 
@@ -116,7 +178,15 @@ def main() -> int:
     parser.add_argument("--poll-seconds", type=float, default=1.0)
     parser.add_argument("--max-tick-p95-ms", type=float, default=1000.0)
     parser.add_argument("--max-query-p95-ms", type=float, default=1500.0)
+    parser.add_argument("--hold", type=float, default=None,
+                        help="segundos de um único estágio sustentado (sem rampa)")
+    parser.add_argument("--hold-eps", type=int, default=1500,
+                        help="ritmo nominal do estágio sustentado (padrão do palco)")
+    parser.add_argument("--slice-seconds", type=float, default=60.0)
     args = parser.parse_args()
+
+    if args.hold:
+        return hold(args)
 
     stages = [int(value) for value in args.stages.split(",") if value.strip()]
     results: list[dict] = []
@@ -170,6 +240,30 @@ def main() -> int:
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if results and not results[-1]["errors"] else 1
+
+
+def hold(args) -> int:
+    """Estágio único e longo: estabilidade, não teto. Não aplica os limites da rampa."""
+    status, _ = request(args.base_url, "/api/live/status")
+    if status.get("state") == "rodando":
+        request(args.base_url, "/api/live/stop", {})
+    try:
+        result = run_stage(args.base_url, args.hold_eps, args.hold, args.poll_seconds,
+                           slice_seconds=args.slice_seconds)
+    except KeyboardInterrupt:
+        request(args.base_url, "/api/live/stop", {})
+        return 1
+    summary = {
+        "measured_at": datetime.now(timezone.utc).isoformat(),
+        "base_url": args.base_url,
+        "mode": "hold",
+        "hold_seconds": args.hold,
+        "slice_seconds": args.slice_seconds,
+        "poll_seconds": args.poll_seconds,
+        "result": result,
+    }
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0 if not result["errors"] else 1
 
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@ de conta rodando dentro do orçamento de uma autorização.
 ```
 
 **Nenhuma rota em `backend/main.py` importa `pymongo`; nenhum módulo em
-`backend/app/db/` importa `fastapi`.** `main.py` (arquivo único, 321 linhas) expõe
+`backend/app/db/` importa `fastapi`.** `main.py` (arquivo único) expõe
 HTTP e traduz erro de domínio em status code; toda query mora em `backend/app/db/`.
 Essa simetria é o que permite `queries/bench.py` reusar os pipelines de produção
 para medir performance sem subir o framework web inteiro.
@@ -89,6 +89,8 @@ Play (frontend)
         o bucket físico via find(rawData: true) em payment_events_live (MongoDB
         8.2+ bloqueia system.buckets.*; servidores antigos caem nesse namespace)
   → uPlot.setData() — o canvas nunca é recriado a cada poll
+  → gaveta aberta: GET /api/live/plan → explain (queryPlanner) do mesmo pipeline,
+    cache 60 s: motor e estágios de block processing (ADR 0003)
 
 Limpar / reiniciar (POST /api/live/clear, POST /api/demo/reset)
   → LiveFeed.clear() sob o lock de ciclo de vida (o mesmo de start/stop)

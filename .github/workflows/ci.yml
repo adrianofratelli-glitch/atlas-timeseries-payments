@@ -19,9 +19,10 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r backend/requirements.txt
       - run: python -m compileall -q backend tests scripts data-generator queries
-      # Offline only: CORS and client cold-start tests need no cluster. The live lifecycle,
+      # Offline only: CORS, client cold-start and the live-proof core (idempotent insert,
+      # write gate, executed pipeline, feed error state) need no cluster. The live lifecycle,
       # adversarial, resilience and stress suites require Atlas and a running API.
-      - run: python -m unittest -v tests/test_cors.py tests/test_client_concurrency.py
+      - run: python -m unittest -v tests/test_cors.py tests/test_client_concurrency.py tests/test_offline_core.py
 
   frontend:
     runs-on: ubuntu-latest
