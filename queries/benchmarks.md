@@ -8,6 +8,27 @@ in `bench-results.json`, `bucket-experiment.json`, `cardinality-experiment.json`
 Re-measure rather than copy forward when the cluster, the volume or the traffic shape
 changes.
 
+## Block processing on the live chart pipeline — 2026-11-12
+
+`queries/block_processing.py --runs 15` on `trilho_pagamentos_test.payment_events`
+(2.53 M events, 3 days), MongoDB 9.0.7, shared M20, network floor p50 310 ms measured in
+the same run (abnormally high that day). Raw output: `queries/block-processing.json`.
+
+| Window | Previous shape (`$set ts` + `$sort ts`) | Current shape (`$sort _id`, rename last) | p50 ratio |
+|---|---|---|---:|
+| 1 h | classic · p50 1,072 ms / p95 1,258 ms | SBE + block · p50 655 ms / p95 823 ms | 1.64× |
+| 24 h | classic · p50 7,175 ms / p95 12,561 ms | SBE + block · p50 4,153 ms / p95 4,605 ms | 1.73× |
+| 72 h | classic · p50 28,461 ms / p95 30,496 ms | SBE + block · p50 23,425 ms / p95 29,242 ms | 1.21× (noisy) |
+
+Identical output in every window. Decision and caveats in `docs/adr/0003-block-processing.md`.
+
+## Sustained hold at the stage rate — pending
+
+`tests/live_ingest_capacity.py --hold 600` (one 10-minute stage sliced per minute, with
+rate and query-p95 drift) exists but has **not been run to completion yet**: a first
+attempt on 2026-11-12 was interrupted after ~30 s. No sustained numbers are claimed until
+it runs; when it does, record the network RTT it reports beside the rates.
+
 ## Reduced-scale re-measurement — 2026-10-06
 
 A check that the mechanism reproduces, not a replacement for the full-scale numbers

@@ -18,7 +18,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-BASE = "http://127.0.0.1:8400"
+BASE = os.getenv("API_BASE", "http://127.0.0.1:8400")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 falhas: list[str] = []
 passou = 0

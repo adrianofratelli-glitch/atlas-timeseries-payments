@@ -259,10 +259,10 @@ export default function App() {
             <article>
               <span>Confirmação do lote</span>
               <strong>{ms(prova.escrita)}</strong>
-              <small>{numero(live?.last_tick_written)} documentos em <code>insert_many</code></small>
-              {live?.network_rtt_ms != null && (
-                <small>piso de rede: {ms(live.network_rtt_ms)} ida e volta</small>
-              )}
+              <small>
+                {numero(live?.last_tick_written)} documentos em <code>insert_many</code>
+                {live?.network_rtt_ms != null && ` · piso de rede ${ms(live.network_rtt_ms)} ida e volta`}
+              </small>
             </article>
             <article>
               <span>Agregação no Atlas</span>
