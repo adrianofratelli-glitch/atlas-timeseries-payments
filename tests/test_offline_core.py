@@ -290,6 +290,7 @@ class PlanUsesExecutedPipelineTests(unittest.TestCase):
             resumo = live_db.plano()
         enviado = fake_db.command.call_args.args[1]["pipeline"]
         self.assertIs(enviado, executado)
+        self.assertIs(resumo["pipeline"], executado)
         self.assertEqual(resumo["pipeline_source"], "ultimo_overview")
 
 
@@ -314,6 +315,31 @@ class CapacityGuardTests(unittest.TestCase):
             with patch("builtins.print"):
                 self.assertEqual(capacity.main(), 2)
         self.assertEqual(chamadas, ["/health"])
+
+    def test_unreachable_health_is_a_reason_not_a_traceback(self):
+        from urllib.error import URLError  # noqa: PLC0415
+
+        def request(base_url, path, payload=None, timeout=20.0):
+            raise URLError("connection refused")
+
+        with patch.object(capacity, "request", request):
+            motivo = capacity.conferir_banco("http://127.0.0.1:1")
+        self.assertIn("fora do ar", motivo)
+
+    def test_starting_feed_is_stopped_before_hold(self):
+        chamadas = []
+
+        def request(base_url, path, payload=None, timeout=20.0):
+            chamadas.append(path)
+            return {"state": "iniciando"}, 1.0
+
+        args = MagicMock(base_url="http://x", hold=1, hold_eps=10, poll_seconds=1.0,
+                         slice_seconds=60.0)
+        with patch.object(capacity, "request", request), \
+             patch.object(capacity, "run_stage", return_value={"errors": []}), \
+             patch("builtins.print"):
+            capacity.hold(args)
+        self.assertEqual(chamadas, ["/api/live/status", "/api/live/stop"])
 
     def test_start_409_becomes_reason_without_traceback(self):
         import io  # noqa: PLC0415

@@ -64,6 +64,10 @@ def _fatia(inicio: float, fim: float, escritos: int, consultas: list[float],
     }
 
 
+# `iniciando`: start aceito, primeiro lote em voo. Também precisa de stop antes do estágio.
+ATIVOS = ("rodando", "iniciando")
+
+
 def banco_permitido(banco: str, env=os.environ) -> bool:
     """Mesmo guarda de tests/test_resilience.py: escreve só em `*_test`.
 
@@ -75,7 +79,12 @@ def banco_permitido(banco: str, env=os.environ) -> bool:
 
 def conferir_banco(base_url: str) -> str | None:
     """Devolve o motivo da recusa, ou None se a API aponta para um banco permitido."""
-    health, _ = request(base_url, "/health")
+    try:
+        health, _ = request(base_url, "/health")
+    except HTTPError as exc:
+        return f"recusado: /health em {base_url} respondeu {_motivo_http(exc)}"
+    except (URLError, TimeoutError) as exc:
+        return f"recusado: API fora do ar em {base_url} ({exc})"
     banco = str(health.get("database", ""))
     if banco_permitido(banco):
         return None
@@ -238,7 +247,7 @@ def main() -> int:
 
     try:
         status, _ = request(args.base_url, "/api/live/status")
-        if status.get("state") == "rodando":
+        if status.get("state") in ATIVOS:
             request(args.base_url, "/api/live/stop", {})
 
         for stage in stages:
@@ -289,7 +298,7 @@ def main() -> int:
 def hold(args) -> int:
     """Estágio único e longo: estabilidade, não teto. Não aplica os limites da rampa."""
     status, _ = request(args.base_url, "/api/live/status")
-    if status.get("state") == "rodando":
+    if status.get("state") in ATIVOS:
         request(args.base_url, "/api/live/stop", {})
     try:
         result = run_stage(args.base_url, args.hold_eps, args.hold, args.poll_seconds,

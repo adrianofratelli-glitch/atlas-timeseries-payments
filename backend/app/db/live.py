@@ -252,6 +252,7 @@ def plano() -> dict:
         "explain", {"aggregate": COLLECTION, "pipeline": pipe, "cursor": {}},
         verbosity="queryPlanner", maxTimeMS=MAX_TIME_MS))
     resumo = {"namespace": f"{db().name}.{COLLECTION}", **resumir_plano(explain),
-              "verbosity": "queryPlanner", "pipeline_source": origem}
+              "verbosity": "queryPlanner", "pipeline_source": origem,
+              "pipeline": pipe}
     _PLANO_CACHE = (agora, resumo)
     return {**resumo, "cached": False}

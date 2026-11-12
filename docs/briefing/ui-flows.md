@@ -59,7 +59,7 @@ Handler: `alternarIngestao()`, `frontend/src/App.jsx:134`.
    `services/live.py: LiveFeed.start()`, que sobe uma thread `live-feed` gerando
    PIX + cartão + TED no mesmo lote.
 4. Frontend entra em polling de 1s (`useEffect` em `App.jsx:99-109`) chamando
-   `GET /api/live/overview` enquanto `live.state === 'rodando'`.
+   `GET /api/live/overview` enquanto `live.state` é `'rodando'` ou `'iniciando'`.
 5. Cada resposta atualiza:
    - **Trilho de ingestão** (`ingestion-flow`, `App.jsx:182-219`): pacotes `{ }`
      animados fluindo do "gerador" até a "pilha de buckets por rota"; a animação
