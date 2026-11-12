@@ -49,10 +49,15 @@ Network floor (`ping`, same run): p50 310 ms. Raw output: `queries/block-process
 
 The 72-hour row is honest noise as much as signal: it groups 259,200 one-second bins,
 the fastest single classic run (16.6 s) beat the fastest SBE run (20.6 s), and the shared
-cluster was busy with other work. The chart only ever asks for 60 seconds; the 1 h and
-24 h rows are the relevant ones and both are well above the noise.
+cluster was busy with other work. The 1 h row is not clean either: the fastest classic
+run (649 ms) ties the SBE median (655 ms), and a 310 ms network floor sits inside every
+sample. The 24 h row is the clearest signal (the SBE p95 is below the classic p50). The
+chart only ever asks for 60 seconds, where the difference is mostly hidden by the round
+trip; the decision rests on the plan (SBE with block stages vs. classic) more than on any
+single ratio.
 
-Both shapes returned identical output in every window. The current shape plans
+Both shapes returned identical output in every window — for the first 60 points,
+because both pipelines end in `$limit: 60`; the full grouped result was not compared. The current shape plans
 `ts_bucket_to_cellblock → block_group → block_to_row`; the previous one plans no block
 stage at all.
 

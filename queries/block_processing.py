@@ -91,7 +91,10 @@ def main() -> int:
             linha[nome] = {"engine": plano["engine"],
                            "block_stages": plano["block_stages"],
                            "latency_ms": percentis(amostras)}
+        # Os dois terminam em `$limit: 60`: compara os 60 primeiros pontos, não o
+        # resultado agrupado inteiro.
         linha["same_output"] = saidas["anterior"] == saidas["atual"]
+        linha["compared_points"] = len(saidas["atual"])
         linha["p50_ratio"] = round(linha["anterior"]["latency_ms"]["p50"]
                                    / linha["atual"]["latency_ms"]["p50"], 2)
         resultado["windows"].append(linha)

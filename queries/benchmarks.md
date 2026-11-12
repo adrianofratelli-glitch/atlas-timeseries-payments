@@ -20,7 +20,10 @@ the same run (abnormally high that day). Raw output: `queries/block-processing.j
 | 24 h | classic · p50 7,175 ms / p95 12,561 ms | SBE + block · p50 4,153 ms / p95 4,605 ms | 1.73× |
 | 72 h | classic · p50 28,461 ms / p95 30,496 ms | SBE + block · p50 23,425 ms / p95 29,242 ms | 1.21× (noisy) |
 
-Identical output in every window. Decision and caveats in `docs/adr/0003-block-processing.md`.
+Identical output in every window, compared on the first 60 points (both pipelines end
+in `$limit: 60`). The 1 h ratio is within noise (fastest classic run 649 ms vs SBE median
+655 ms, with a 310 ms network floor in every sample); 24 h is the clear case. Decision and
+caveats in `docs/adr/0003-block-processing.md`.
 
 ## Sustained hold at the stage rate — pending
 

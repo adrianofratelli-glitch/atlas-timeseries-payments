@@ -388,9 +388,11 @@ measuring a reduced-scale database.
 With the application already running, reproduce the bounded live-capacity ramp:
 
 ```bash
-python3 tests/live_ingest_capacity.py --duration 12
+# both modes write through the API and refuse a non-*_test database
+# (ALLOW_DEMO_DB_WRITE=1 to measure the demo database on purpose)
+python3 tests/live_ingest_capacity.py --base-url http://127.0.0.1:8400 --duration 12
 # sustained: one 10-minute stage at the stage rate, sliced per minute, with drift verdict
-python3 tests/live_ingest_capacity.py --hold 600
+python3 tests/live_ingest_capacity.py --base-url http://127.0.0.1:8400 --hold 600
 ```
 
 The ramp writes synthetic events to `payment_events_live` and stops automatically when

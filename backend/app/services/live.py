@@ -173,6 +173,9 @@ class LiveFeed:
             self.last_tick_duration_ms = 0.0
             self.last_document = None
             self.last_error = None
+            # Nem "parado" (o anterior) nem "rodando" (ainda sem lote): quem lê o status
+            # entre o start e o primeiro lote vê que a escrita está começando.
+            self.state = "iniciando"
             self._epoch = self._gate.epoch
             thread = threading.Thread(target=self._run, args=(eps, self._epoch),
                                       name="live-feed", daemon=True)
@@ -181,7 +184,7 @@ class LiveFeed:
             # thread que ainda não pode receber `join()`.
             self._thread = thread
         for _ in range(60):
-            if self.written or self.last_error:
+            if self.written or self.last_error or self.state == "erro":
                 break
             time.sleep(0.1)
         return self.status()
@@ -286,6 +289,9 @@ class LiveFeed:
             # Apagada por fora (shell, script): recria como time series antes do lote.
             ensure_collection()
             return True
+        # Estado antes da mensagem: quem lê o status entre as duas atribuições nunca vê
+        # um erro registrado com o feed ainda "rodando".
+        self.state = "erro"
         self.last_error = f"{COLLECTION} existe como '{kind}', não time series"
         self._stop.set()
         return False
@@ -437,8 +443,8 @@ class LiveFeed:
         except Exception as exc:  # noqa: BLE001 — o gerador não derruba a API
             # Escritor de época vencida não sobrescreve o estado do feed atual.
             if self._vigente(epoch):
-                self.last_error = f"{type(exc).__name__}: {exc}"
                 self.state = "erro"
+                self.last_error = f"{type(exc).__name__}: {exc}"
 
 
 feed = LiveFeed()

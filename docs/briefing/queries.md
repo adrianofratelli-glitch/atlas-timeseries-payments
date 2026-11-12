@@ -349,7 +349,7 @@ provedores em 24h não cabe no orçamento de `MAX_TIME_MS`.
 
 Onde é chamada: `ranking()`, exposta em `GET /api/ranking?hours=&limit=`.
 
-### 8. Overview da ingestão ao vivo — `backend/app/db/live.py:112-165`
+### 8. Overview da ingestão ao vivo — `backend/app/db/live.py:112-167`
 
 O que faz: agrega os eventos de `payment_events_live` em bins de 1 segundo, sobre
 os últimos 60s, e devolve junto a configuração real da coleção e o bucket físico
@@ -376,7 +376,7 @@ pipeline inteiro para o motor clássico, sem block processing. A forma atual man
 os estágios `ts_bucket_to_cellblock`, `block_group` e `block_to_row`, com a mesma saída.
 
 Plano de execução (`live.py::plano`, `GET /api/live/plan`): `explain` com
-`verbosity: "queryPlanner"` (planeja sem executar) do mesmo pipeline para a janela atual,
+`verbosity: "queryPlanner"` (planeja sem executar) do último pipeline que o overview executou (o da gaveta; sem overview ainda, o mesmo formato na janela atual),
 cache de 60 s, resumido por `live.py::resumir_plano` em motor (`sbe`/`classic`), estágios
 de bloco e versão do servidor. A gaveta da query o pede só ao abrir.
 

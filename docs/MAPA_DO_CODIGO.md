@@ -59,19 +59,19 @@ Na tela de palco existe **um botão**. Além dele, há chamadas automáticas ao 
 
 | Tela / ação | Componente (arquivo:linha) | Chamada HTTP | Handler | Função de negócio | MongoDB |
 |---|---|---|---|---|---|
-| Abrir a página (selo "Atlas conectado") | `App.jsx:104` (`api.health`, `api.liveStatus`) | `GET /health`, `GET /api/live/status` | `main.py:89` (`health`), `main.py:286` (`live_status`) | `health`: ping + lê `dataset_info`; `feed.status()` | `ping`; `dataset_info`: `find_one`; `payment_events`: `estimated_document_count` (só se faltar o dado) |
-| Abrir a página (faixa de bucketização) | `App.jsx:116` (`api.storage`) | `GET /api/storage` | `main.py:172` (`storage_comparison`) | `app/db/storage.py::comparison` (`:62`); aquecido no startup por `storage.aquecer` (`:49`, chamado em `main.py:39`) | `$collStats` `storageStats` em `payment_events` e `payment_events_flat` (`storage.py:28`) |
-| **Iniciar ingestão** | `App.jsx:133` (`alternarIngestao`), botão `App.jsx:207` | `POST /api/live/start` (`api.js` `liveStart`) | `main.py:257` (`live_start`) | `LiveFeed.start` (`services/live.py:159`) abre a thread `live-feed` que roda `LiveFeed._run` (`:293`); `ensure_collection` (`:68`) | cria `payment_events_live` (`create_collection` com `timeseries` e `expireAfterSeconds`, `:84`) + 3 índices (`:94-96`); lê `provedores` (`:304`) e `dataset_info` (`:327`); grava lotes com `insert_idempotent` (`:400`) -> `insert_many(ordered=False)` (`client.py:93`) |
-| (automático a cada 1 s enquanto roda) Curva, métricas, bucket físico, documento | `App.jsx:121` (efeito) + `atualizar` (`App.jsx:81`, `api.liveOverview`) | `GET /api/live/overview` | `main.py:291` (`live_overview`) | `app/db/live.py::overview` (`:112`) | `payment_events_live`: `aggregate` (`:130`) com `$dateTrunc`; `listCollections` (`_collection_options` `:20`); `find` com `rawData:true` no bucket (`_find_bucket_raw` `:99`, legado `:107`) |
-| **Parar ingestão** | `App.jsx:137` | `POST /api/live/stop` | `main.py:276` (`live_stop`) | `LiveFeed.stop` (`services/live.py:205`) | nenhuma query nova |
-| Abrir "Ver query / chamada executada" | `QueryDetails.jsx` (recebe `overview.pipeline`, `App.jsx:311`; pede o plano no `onToggle`) | `GET /api/live/plan` (`api.js` `livePlan`), uma vez por abertura | `main.py:306` (`live_plan`) | `app/db/live.py::plano` (`:229`), resumido por `resumir_plano` (`:203`) e `evidence.js::resumoDoPlano` | `explain` do mesmo pipeline com `verbosity: "queryPlanner"` (não executa), cache de 60 s |
-| Aviso "API anterior" | `App.jsx:56` (`fallbackAnterior`) | `GET /api/live/status` | `main.py:286` | `feed.status()` | - |
+| Abrir a página (selo "Atlas conectado") | `App.jsx:105` (`api.health`, `api.liveStatus`) | `GET /health`, `GET /api/live/status` | `main.py:89` (`health`), `main.py:286` (`live_status`) | `health`: ping + lê `dataset_info`; `feed.status()` | `ping`; `dataset_info`: `find_one`; `payment_events`: `estimated_document_count` (só se faltar o dado) |
+| Abrir a página (faixa de bucketização) | `App.jsx:117` (`api.storage`) | `GET /api/storage` | `main.py:172` (`storage_comparison`) | `app/db/storage.py::comparison` (`:62`); aquecido no startup por `storage.aquecer` (`:49`, chamado em `main.py:39`) | `$collStats` `storageStats` em `payment_events` e `payment_events_flat` (`storage.py:28`) |
+| **Iniciar ingestão** | `App.jsx:134` (`alternarIngestao`), botão `App.jsx:208` | `POST /api/live/start` (`api.js` `liveStart`) | `main.py:257` (`live_start`) | `LiveFeed.start` (`services/live.py:159`) abre a thread `live-feed` que roda `LiveFeed._run` (`:299`); `ensure_collection` (`:68`) | cria `payment_events_live` (`create_collection` com `timeseries` e `expireAfterSeconds`, `:84`) + 3 índices (`:94-96`); lê `provedores` (`:310`) e `dataset_info` (`:333`); grava lotes com `insert_idempotent` (`:406`) -> `insert_many(ordered=False)` (`client.py:93`) |
+| (automático a cada 1 s enquanto roda) Curva, métricas, bucket físico, documento | `App.jsx:122` (efeito) + `atualizar` (`App.jsx:82`, `api.liveOverview`) | `GET /api/live/overview` | `main.py:291` (`live_overview`) | `app/db/live.py::overview` (`:112`) | `payment_events_live`: `aggregate` (`:132`) com `$dateTrunc`; `listCollections` (`_collection_options` `:20`); `find` com `rawData:true` no bucket (`_find_bucket_raw` `:99`, legado `:107`) |
+| **Parar ingestão** | `App.jsx:138` | `POST /api/live/stop` | `main.py:276` (`live_stop`) | `LiveFeed.stop` (`services/live.py:208`) | nenhuma query nova |
+| Abrir "Ver query / chamada executada" | `QueryDetails.jsx` (recebe `overview.pipeline`, `App.jsx:312`; pede o plano no `onToggle`) | `GET /api/live/plan` (`api.js` `livePlan`), uma vez por abertura | `main.py:306` (`live_plan`) | `app/db/live.py::plano` (`:234`), resumido por `resumir_plano` (`:208`) e `evidence.js::resumoDoPlano` | `explain` do mesmo pipeline com `verbosity: "queryPlanner"` (não executa), cache de 60 s |
+| Aviso "API anterior" | `App.jsx:57` (`fallbackAnterior`) | `GET /api/live/status` | `main.py:286` | `feed.status()` | - |
 
 Rotas que **existem mas nenhum botão da tela atual aciona** (ficam para engenharia/benchmark; `api.js` ainda expõe várias delas):
 
 | Rota | Handler | Função | MongoDB |
 |---|---|---|---|
-| `POST /api/live/degrade` | `main.py:269` | `LiveFeed.degradar` (`services/live.py:189`) | só altera o gerador; sem query |
+| `POST /api/live/degrade` | `main.py:269` | `LiveFeed.degradar` (`services/live.py:192`) | só altera o gerador; sem query |
 | `POST /api/live/clear` | `main.py:281` | `LiveFeed.clear` (`:215`) | `drop` de `payment_events_live` (`:234`) |
 | `GET /api/live/health/{provedor_id}` | `main.py:312` | `providers.saude_ao_vivo` (`providers.py:148`) | `payment_events_live`: aggregate com `$setWindowFields` (`:231`); `provedores`: `find_one` |
 | `GET /api/providers`, `/api/providers/{id}`, `/api/scenarios` | `main.py:128,132,140` | `registry.provedores/provedor/cenarios/contas_demo` | `provedores`, `degradation_scenarios`, `demo_accounts`: `find` |
@@ -92,8 +92,8 @@ Texto completo de cada pipeline: [queries.md](briefing/queries.md). Não há `$r
 |---|---|---|---|
 | Criar a coleção time series ao vivo | `services/live.py::ensure_collection` (`:68`, create `:84`) | `create_collection(timeseries={timeField:ts, metaField:meta, bucketMaxSpanSeconds:300, bucketRoundingSeconds:300}, expireAfterSeconds)` (`_TIMESERIES` `:47`) | `payment_events_live` |
 | Índices da coleção ao vivo | `ensure_collection` (`:94-96`) | `create_index` em `ts`, `meta.provedor+ts`, `meta.canal+ts` | `payment_events_live` |
-| Gravar lote | `db/client.py::insert_idempotent` (`:68`, `insert_many` `:93`,`:99`) chamado de `services/live.py::LiveFeed._run` (`:400`) | `insert_many(ordered=False)` com conferência de `_id` na repetição (`:100`) | `payment_events_live` |
-| Curva de throughput (o gráfico) | `db/live.py::overview` (`:112`, pipeline `:128`, aggregate `:130`) | `$match` + `$group` por `$dateTrunc` de 1 s + `$sort` + `$project` + `$limit` | `payment_events_live` |
+| Gravar lote | `db/client.py::insert_idempotent` (`:68`, `insert_many` `:93`,`:99`) chamado de `services/live.py::LiveFeed._run` (`:406`) | `insert_many(ordered=False)` com conferência de `_id` na repetição (`:100`) | `payment_events_live` |
+| Curva de throughput (o gráfico) | `db/live.py::overview` (`:112`, pipeline `:128`, aggregate `:132`) | `$match` + `$group` por `$dateTrunc` de 1 s + `$sort` + `$project` + `$limit` | `payment_events_live` |
 | Configuração real da coleção (prova do time series) | `db/live.py::_collection_options` (`:20`, command `:29`) | `listCollections` | `payment_events_live` |
 | Bucket físico do último documento | `db/live.py::_bucket_snapshot` (`:46`), `_find_bucket_raw` (`:99`), `_find_bucket_legacy` (`:107`) | `find` com `rawData: true` (servidor novo) ou leitura de `system.buckets.*` (servidor antigo) | `payment_events_live` |
 | Comparação de armazenamento | `db/storage.py::_stats` (`:25`, `:28`) | `$collStats` com `storageStats` | `payment_events`, `payment_events_flat` |
@@ -128,10 +128,10 @@ Texto completo de cada pipeline: [queries.md](briefing/queries.md). Não há `$r
 ## 5. "Quero mexer em..." (atalhos)
 
 - Ritmo de eventos do feed -> `LIVE_TARGET_EPS` no `.env` (padrão em `backend/app/config.py:73`); o corpo de `POST /api/live/start` aceita `eps` (`main.py:LiveStart`).
-- Formato do evento gerado ao vivo (campos, canais, valores) -> `backend/app/services/live.py::LiveFeed._run` (`:293`, montagem do documento em `:386`).
+- Formato do evento gerado ao vivo (campos, canais, valores) -> `backend/app/services/live.py::LiveFeed._run` (`:299`, montagem do documento em `:392`).
 - Configuração da coleção time series (bucket, TTL, meta) -> `_TIMESERIES` em `services/live.py:47` e `LIVE_TTL_SECONDS`.
 - Pipeline da curva do gráfico -> `backend/app/db/live.py::overview` (`:128`).
-- Texto do título, do botão e dos rótulos -> `frontend/src/App.jsx` (cabeçalho em torno de `:191-207`).
+- Texto do título, do botão e dos rótulos -> `frontend/src/App.jsx` (cabeçalho em torno de `:192-208`).
 - Números do bloco "Resultado da bucketização" (benchmark estático) -> constante `BUCKETIZATION_BENCHMARK` em `frontend/src/evidence.js:27`; o número medido ao vivo vem de `bucketizacaoMedida` (`frontend/src/evidence.js:35`) e `storage.py`.
 - Visual do gráfico -> `frontend/src/Chart.jsx` (tabela `MODOS`).
 - Adicionar uma rota -> função em `backend/main.py`; a consulta vai num módulo novo em `backend/app/db/`.

@@ -24,6 +24,9 @@ import app.db.live as live_db  # noqa: E402
 import app.db.ranges as ranges  # noqa: E402
 import app.services.live as live_svc  # noqa: E402
 
+sys.path.insert(0, str(ROOT / "tests"))
+import live_ingest_capacity as capacity  # noqa: E402
+
 
 class FakeTimeSeries:
     """Coleção em memória sem índice único em `_id`, como uma time series."""
@@ -235,6 +238,95 @@ class FeedStateTests(unittest.TestCase):
         self.assertEqual(status["state"], "erro")
         self.assertIn("sem provedores", status["last_error"])
         self.assertEqual(status["written"], 0)
+
+
+class FeedErrorOrderingTests(unittest.TestCase):
+    def test_invalid_collection_sets_error_state(self):
+        feed = live_svc.LiveFeed()
+        feed.state = "rodando"
+        with patch.object(live_svc, "collection_kind", return_value="collection"):
+            self.assertFalse(feed._colecao_ok())
+        self.assertEqual(feed.state, "erro")
+        self.assertIn("não time series", feed.last_error)
+
+    def test_start_reports_iniciando_before_first_batch(self):
+        feed = live_svc.LiveFeed()
+        liberar = threading.Event()
+        with patch.object(feed, "_run", lambda eps, epoch: liberar.wait(5)), \
+             patch.object(live_svc.time, "sleep", lambda _s: None):
+            status = feed.start(eps=10)
+        liberar.set()
+        feed._thread.join(5)
+        self.assertEqual(status["state"], "iniciando")
+
+
+class StartRouteTests(unittest.TestCase):
+    def test_failed_start_is_409_with_reason(self):
+        import main  # noqa: PLC0415 — só este teste precisa do FastAPI
+        from fastapi import HTTPException  # noqa: PLC0415
+        status = {"state": "erro", "last_error": "trilho sem provedores",
+                  "started_at": datetime.now(timezone.utc)}
+        with patch.object(main.feed, "start", return_value=status):
+            with self.assertRaises(HTTPException) as ctx:
+                main.live_start(main.LiveStart())
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(ctx.exception.detail["reason"], "trilho sem provedores")
+
+    def test_running_start_is_returned(self):
+        import main  # noqa: PLC0415
+        with patch.object(main.feed, "start", return_value={"state": "rodando"}):
+            self.assertEqual(main.live_start(main.LiveStart())["state"], "rodando")
+
+
+class PlanUsesExecutedPipelineTests(unittest.TestCase):
+    def test_explain_reads_last_overview_pipeline(self):
+        executado = [{"$match": {"ts": {"$gte": 1, "$lt": 2}}}, {"$limit": 60}]
+        fake_db = MagicMock()
+        fake_db.name = "trilho_test"
+        fake_db.command.return_value = {"queryPlanner": {"winningPlan": {"stage": "X"}}}
+        with patch.object(live_db, "db", return_value=fake_db), \
+             patch.object(live_db, "_ULTIMO_PIPE", executado), \
+             patch.object(live_db, "_PLANO_CACHE", (0.0, None)):
+            resumo = live_db.plano()
+        enviado = fake_db.command.call_args.args[1]["pipeline"]
+        self.assertIs(enviado, executado)
+        self.assertEqual(resumo["pipeline_source"], "ultimo_overview")
+
+
+class CapacityGuardTests(unittest.TestCase):
+    def test_only_test_databases_unless_explicit(self):
+        self.assertTrue(capacity.banco_permitido("trilho_pagamentos_test", {}))
+        self.assertFalse(capacity.banco_permitido("trilho_pagamentos", {}))
+        self.assertTrue(capacity.banco_permitido("trilho_pagamentos",
+                                                 {"ALLOW_DEMO_DB_WRITE": "1"}))
+
+    def test_main_refuses_demo_database_before_any_write(self):
+        chamadas = []
+
+        def request(base_url, path, payload=None, timeout=20.0):
+            chamadas.append(path)
+            return {"database": "trilho_pagamentos"}, 1.0
+
+        argv = ["live_ingest_capacity.py", "--hold", "600"]
+        with patch.object(capacity, "request", request), patch.object(sys, "argv", argv), \
+             patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ALLOW_DEMO_DB_WRITE", None)
+            with patch("builtins.print"):
+                self.assertEqual(capacity.main(), 2)
+        self.assertEqual(chamadas, ["/health"])
+
+    def test_start_409_becomes_reason_without_traceback(self):
+        import io  # noqa: PLC0415
+        from urllib.error import HTTPError  # noqa: PLC0415
+        corpo = io.BytesIO(b'{"detail": {"reason": "trilho sem provedores"}}')
+
+        def request(base_url, path, payload=None, timeout=20.0):
+            raise HTTPError(base_url + path, 409, "Conflict", {}, corpo)
+
+        with patch.object(capacity, "request", request):
+            result = capacity.run_stage("http://x", 1500, 5, 1.0)
+        self.assertEqual(result["errors"], ["HTTP 409: trilho sem provedores"])
+        self.assertEqual(result["written"], 0)
 
 
 if __name__ == "__main__":

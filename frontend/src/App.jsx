@@ -31,7 +31,8 @@ export default function App() {
   const [backendAnterior, setBackendAnterior] = useState(false)
   const backendAnteriorRef = useRef(false)
 
-  const aoVivo = live?.state === 'rodando'
+  // `iniciando`: start aceito, primeiro lote ainda em voo — o polling já começa.
+  const aoVivo = live?.state === 'rodando' || live?.state === 'iniciando'
   const falhaIngestao = falhaDaIngestao(live)
   const pontos = overview?.points ?? []
   const ultimoPonto = pontos.at(-1)

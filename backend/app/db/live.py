@@ -126,6 +126,8 @@ def overview(session_started_at: datetime | None = None,
     # responsável pela retenção, como seria numa operação real.
     start = max(window_start, session_started_at) if session_started_at else window_start
     pipe = _pipeline(start, end)
+    global _ULTIMO_PIPE
+    _ULTIMO_PIPE = pipe
     points = with_retry(lambda: list(
         db()[COLLECTION].aggregate(pipe, maxTimeMS=MAX_TIME_MS)))
     return {
@@ -167,6 +169,9 @@ def _pipeline(start: datetime, end: datetime) -> list[dict]:
 # --------------------------------------------------------------- plano de execução
 _PLANO_CACHE: tuple[float, dict | None] = (0.0, None)
 PLANO_CACHE_SECONDS = 60.0
+# O último pipeline que o overview executou: é ele que a gaveta mostra, e é ele que
+# o explain lê — não uma janela reconstruída que poderia divergir do que rodou.
+_ULTIMO_PIPE: list[dict] | None = None
 
 
 def _estagios(no, saida: list[str]) -> list[str]:
@@ -227,7 +232,7 @@ def resumir_plano(explain: dict) -> dict:
 
 
 def plano() -> dict:
-    """`explain` (queryPlanner: planeja sem executar) do pipeline da janela atual.
+    """`explain` (queryPlanner: planeja sem executar) do último pipeline do overview.
 
     Sob demanda e com cache: o plano não muda a cada segundo e um explain por poll
     dobraria as idas ao cluster do caminho interativo.
@@ -236,12 +241,17 @@ def plano() -> dict:
     agora = time.monotonic()
     if _PLANO_CACHE[1] is not None and agora - _PLANO_CACHE[0] < PLANO_CACHE_SECONDS:
         return {**_PLANO_CACHE[1], "cached": True}
-    end = datetime.now(timezone.utc).replace(microsecond=0)
-    pipe = _pipeline(end - timedelta(seconds=60), end)
+    pipe = _ULTIMO_PIPE
+    origem = "ultimo_overview"
+    if pipe is None:
+        # API recém-iniciada, sem nenhum overview ainda: mesmo formato, janela atual.
+        end = datetime.now(timezone.utc).replace(microsecond=0)
+        pipe = _pipeline(end - timedelta(seconds=60), end)
+        origem = "janela_atual"
     explain = with_retry(lambda: db().command(
         "explain", {"aggregate": COLLECTION, "pipeline": pipe, "cursor": {}},
         verbosity="queryPlanner", maxTimeMS=MAX_TIME_MS))
     resumo = {"namespace": f"{db().name}.{COLLECTION}", **resumir_plano(explain),
-              "verbosity": "queryPlanner"}
+              "verbosity": "queryPlanner", "pipeline_source": origem}
     _PLANO_CACHE = (agora, resumo)
     return {**resumo, "cached": False}

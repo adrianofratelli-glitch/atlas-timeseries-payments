@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import statistics
 import time
 from datetime import datetime, timezone
@@ -63,9 +64,48 @@ def _fatia(inicio: float, fim: float, escritos: int, consultas: list[float],
     }
 
 
+def banco_permitido(banco: str, env=os.environ) -> bool:
+    """Mesmo guarda de tests/test_resilience.py: escreve só em `*_test`.
+
+    A rampa e o hold gravam milhares de eventos por segundo em `payment_events_live`
+    pela API; contra a demo, só com `ALLOW_DEMO_DB_WRITE=1` explícito.
+    """
+    return banco.endswith("_test") or env.get("ALLOW_DEMO_DB_WRITE") == "1"
+
+
+def conferir_banco(base_url: str) -> str | None:
+    """Devolve o motivo da recusa, ou None se a API aponta para um banco permitido."""
+    health, _ = request(base_url, "/health")
+    banco = str(health.get("database", ""))
+    if banco_permitido(banco):
+        return None
+    return (f"recusado: a API em {base_url} aponta para '{banco}', não para um banco "
+            "*_test (suba com MONGODB_DB=<banco>_test ou exporte ALLOW_DEMO_DB_WRITE=1)")
+
+
+def _motivo_http(exc: HTTPError) -> str:
+    try:
+        corpo = json.loads(exc.read().decode("utf-8") or "{}")
+    except (ValueError, OSError):
+        corpo = {}
+    finally:
+        exc.close()
+    detalhe = corpo.get("detail")
+    motivo = detalhe.get("reason") if isinstance(detalhe, dict) else detalhe
+    return f"HTTP {exc.code}: {motivo or exc.reason}"
+
+
 def run_stage(base_url: str, requested_eps: int, duration: float,
               poll_seconds: float, slice_seconds: float | None = None) -> dict:
-    start, start_http_ms = request(base_url, "/api/live/start", {"eps": requested_eps})
+    try:
+        start, start_http_ms = request(base_url, "/api/live/start",
+                                       {"eps": requested_eps})
+    except HTTPError as exc:
+        # 409: o escritor falhou antes do primeiro lote (banco sem carga, coleção
+        # inválida). Resultado com o motivo, sem traceback e sem estágio seguinte.
+        return {"requested_eps": requested_eps, "confirmed_eps": 0.0, "written": 0,
+                "tick_ms_p95": None, "query_server_ms_p95": None,
+                "state": "erro", "errors": [_motivo_http(exc)]}
     seen_tick = -1
     tick_durations: list[float] = []
     tick_sizes: list[float] = []
@@ -185,6 +225,10 @@ def main() -> int:
     parser.add_argument("--slice-seconds", type=float, default=60.0)
     args = parser.parse_args()
 
+    recusa = conferir_banco(args.base_url)
+    if recusa:
+        print(recusa)
+        return 2
     if args.hold:
         return hold(args)
 
