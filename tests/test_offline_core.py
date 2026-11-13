@@ -341,6 +341,43 @@ class CapacityGuardTests(unittest.TestCase):
             capacity.hold(args)
         self.assertEqual(chamadas, ["/api/live/status", "/api/live/stop"])
 
+    def test_slice_separates_offered_load_from_confirmed_rate(self):
+        # Lote de 2.000 por tick e 60.000 confirmados em 60 s: sustentação 50%.
+        with patch.object(capacity, "rss_mb", return_value=None):
+            fatia = capacity._fatia(0.0, 60.0, 60_000, [500.0], [1800.0, 2200.0], [300.0],
+                                    [2000.0, 2000.0])
+        self.assertEqual(fatia["confirmed_eps"], 1000.0)
+        self.assertEqual(fatia["offered_eps"], 2000.0)
+        self.assertEqual(fatia["sustainability_pct"], 50.0)
+        self.assertEqual(fatia["tick_ms_p50"], 2000.0)
+
+    def test_drift_reports_sustainability_tick_and_memory_slope(self):
+        fatias = [
+            {"seconds": 60, "confirmed_eps": 900, "sustainability_pct": 40,
+             "query_server_ms_p95": 900, "tick_ms_p95": 3000, "backend_rss_mb": 300},
+            {"seconds": 60, "confirmed_eps": 1000, "sustainability_pct": 50,
+             "query_server_ms_p95": 800, "tick_ms_p95": 2000, "backend_rss_mb": 200},
+            {"seconds": 60, "confirmed_eps": 1000, "sustainability_pct": 52,
+             "query_server_ms_p95": 800, "tick_ms_p95": 2000, "backend_rss_mb": 210},
+            {"seconds": 60, "confirmed_eps": 1000, "sustainability_pct": 53,
+             "query_server_ms_p95": 800, "tick_ms_p95": 2200, "backend_rss_mb": 220},
+        ]
+        d = capacity.deriva(fatias)
+        self.assertEqual(d["slices_compared"], 3)  # aquecimento fora
+        self.assertEqual(d["sustainability_last_minus_first_pp"], 3)
+        self.assertEqual(d["tick_p95_last_over_first"], 1.1)
+        self.assertEqual(d["rss_slope_mb_per_min"], 10.0)
+
+    def test_partial_last_slice_is_kept_out_of_drift(self):
+        base = {"seconds": 60, "confirmed_eps": 1000, "sustainability_pct": 50,
+                "query_server_ms_p95": 800, "tick_ms_p95": 2000, "backend_rss_mb": 200}
+        fatias = [dict(base), dict(base), dict(base),
+                  dict(base, confirmed_eps=10, partial=True)]
+        self.assertEqual(capacity.deriva(fatias)["rate_last_over_first"], 1.0)
+
+    def test_rss_without_pid_is_none(self):
+        self.assertIsNone(capacity.rss_mb(None))
+
     def test_start_409_becomes_reason_without_traceback(self):
         import io  # noqa: PLC0415
         from urllib.error import HTTPError  # noqa: PLC0415

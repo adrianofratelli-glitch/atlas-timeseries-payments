@@ -16,6 +16,7 @@ import json
 import math
 import os
 import statistics
+import subprocess
 import time
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
@@ -53,14 +54,49 @@ def round_or_none(value: float | None) -> float | None:
     return None if value is None else round(value, 1)
 
 
+def rss_mb(pid: int | None) -> float | None:
+    """Memória residente do backend (MB) via `ps`; None sem PID ou se o processo sumiu."""
+    if not pid:
+        return None
+    try:
+        saida = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)], capture_output=True,
+                               text=True, timeout=5, check=False).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return round(int(saida) / 1024, 1) if saida.isdigit() else None
+
+
+def load_1m() -> float | None:
+    try:
+        return round(os.getloadavg()[0], 2)
+    except (OSError, AttributeError):
+        return None
+
+
 def _fatia(inicio: float, fim: float, escritos: int, consultas: list[float],
-           ticks: list[float], rtts: list[float]) -> dict:
+           ticks: list[float], rtts: list[float], lotes: list[float] | None = None,
+           backend_pid: int | None = None) -> dict:
+    """Uma fatia do hold.
+
+    `offered_eps` é o lote médio gerado por tick (o tick nominal é 1 s): a curva do
+    dia simulado avança 5 min por tick, então a carga oferecida muda ao longo do hold.
+    `sustainability_pct` (confirmado ÷ oferecido) separa essa forma de tráfego de uma
+    degradação do banco; a taxa crua sozinha confunde as duas.
+    """
+    segundos = max(fim - inicio, 0.001)
+    confirmado = escritos / segundos
+    oferecido = statistics.mean(lotes) if lotes else None
     return {
         "seconds": round(fim - inicio, 1),
-        "confirmed_eps": round(escritos / max(fim - inicio, 0.001), 1),
+        "confirmed_eps": round(confirmado, 1),
+        "offered_eps": round_or_none(oferecido),
+        "sustainability_pct": round(confirmado / oferecido * 100, 1) if oferecido else None,
         "query_server_ms_p95": round_or_none(percentile(consultas, 0.95)),
+        "tick_ms_p50": round_or_none(percentile(ticks, 0.50)),
         "tick_ms_p95": round_or_none(percentile(ticks, 0.95)),
         "network_rtt_ms_p50": round_or_none(percentile(rtts, 0.50)),
+        "backend_rss_mb": rss_mb(backend_pid),
+        "load_1m": load_1m(),
     }
 
 
@@ -105,7 +141,8 @@ def _motivo_http(exc: HTTPError) -> str:
 
 
 def run_stage(base_url: str, requested_eps: int, duration: float,
-              poll_seconds: float, slice_seconds: float | None = None) -> dict:
+              poll_seconds: float, slice_seconds: float | None = None,
+              backend_pid: int | None = None) -> dict:
     try:
         start, start_http_ms = request(base_url, "/api/live/start",
                                        {"eps": requested_eps})
@@ -129,6 +166,7 @@ def run_stage(base_url: str, requested_eps: int, duration: float,
     slice_queries: list[float] = []
     slice_ticks: list[float] = []
     slice_rtts: list[float] = []
+    slice_lotes: list[float] = []
     deadline = time.monotonic() + duration
 
     while time.monotonic() < deadline:
@@ -151,19 +189,30 @@ def run_stage(base_url: str, requested_eps: int, duration: float,
             tick_durations.append(float(last.get("last_tick_duration_ms", 0.0)))
             slice_ticks.append(tick_durations[-1])
             tick_sizes.append(float(last.get("last_tick_written", 0.0)))
+            slice_lotes.append(tick_sizes[-1])
         agora = time.monotonic()
         if slice_seconds and agora - slice_start >= slice_seconds:
             escrito = int(last.get("written", 0))
             slices.append(_fatia(slice_start, agora, escrito - slice_written,
-                                 slice_queries, slice_ticks, slice_rtts))
+                                 slice_queries, slice_ticks, slice_rtts, slice_lotes,
+                                 backend_pid))
             slice_start, slice_written = agora, escrito
-            slice_queries, slice_ticks, slice_rtts = [], [], []
+            slice_queries, slice_ticks, slice_rtts, slice_lotes = [], [], [], []
         if last.get("state") == "erro" or last.get("last_error"):
             errors.append(last.get("last_error") or "feed em estado de erro")
             break
         # A interface agenda a próxima consulta depois da resposta anterior.
         time.sleep(poll_seconds)
 
+    if slice_seconds and not errors and time.monotonic() - slice_start >= 0.3 * slice_seconds:
+        # A cadência real das fatias passa um pouco de `slice_seconds` (a consulta
+        # leva ~1 s), então o hold de 600 s fechava 9 fatias e perdia ~55 s finais.
+        # A sobra entra marcada como parcial; a deriva não a usa.
+        agora = time.monotonic()
+        fatia = _fatia(slice_start, agora, int(last.get("written", 0)) - slice_written,
+                       slice_queries, slice_ticks, slice_rtts, slice_lotes, backend_pid)
+        fatia["partial"] = True
+        slices.append(fatia)
     final, stop_http_ms = request(base_url, "/api/live/stop", {})
     started_at = datetime.fromisoformat(str(final["started_at"]))
     elapsed = max((datetime.now(timezone.utc) - started_at).total_seconds(), 0.001)
@@ -195,11 +244,14 @@ def run_stage(base_url: str, requested_eps: int, duration: float,
 
 
 def deriva(slices: list[dict]) -> dict | None:
-    """Último contra primeiro minuto: taxa (razão) e p95 da consulta (razão).
+    """Último contra primeiro minuto: taxa, sustentação, ciclo, consulta e memória.
 
-    Exclui a primeira fatia se houver três ou mais: ela inclui o aquecimento do
+    A taxa crua acompanha a curva do dia simulado; `sustainability_*` e `tick_p95_*`
+    são os sinais de degradação. `rss_slope_mb_per_min` é a inclinação (mínimos
+    quadrados) da memória do backend entre as fatias úteis. Exclui a primeira fatia se houver três ou mais: ela inclui o aquecimento do
     feed (primeiro lote, criação de buckets).
     """
+    slices = [f for f in slices if not f.get("partial")]
     uteis = slices[1:] if len(slices) >= 3 else slices
     if len(uteis) < 2:
         return None
@@ -216,7 +268,30 @@ def deriva(slices: list[dict]) -> dict | None:
         if statistics.mean(taxas) else None,
         "query_p95_last_over_first": razao(primeira["query_server_ms_p95"],
                                            ultima["query_server_ms_p95"]),
+        "sustainability_last_minus_first_pp": (
+            round(ultima["sustainability_pct"] - primeira["sustainability_pct"], 1)
+            if ultima.get("sustainability_pct") is not None
+            and primeira.get("sustainability_pct") is not None else None),
+        "tick_p95_last_over_first": razao(primeira.get("tick_ms_p95"),
+                                          ultima.get("tick_ms_p95")),
+        "rss_slope_mb_per_min": inclinacao(
+            [f.get("seconds", 0.0) for f in uteis], [f.get("backend_rss_mb") for f in uteis]),
     }
+
+
+def inclinacao(segundos: list[float], valores: list[float | None]) -> float | None:
+    """Inclinação por minuto de uma série por fatia (mínimos quadrados)."""
+    pontos, t = [], 0.0
+    for dur, v in zip(segundos, valores):
+        t += dur
+        if v is not None:
+            pontos.append((t / 60.0, v))
+    if len(pontos) < 2:
+        return None
+    mx = statistics.mean(x for x, _ in pontos)
+    my = statistics.mean(y for _, y in pontos)
+    den = sum((x - mx) ** 2 for x, _ in pontos)
+    return round(sum((x - mx) * (y - my) for x, y in pontos) / den, 2) if den else None
 
 
 def main() -> int:
@@ -232,6 +307,8 @@ def main() -> int:
     parser.add_argument("--hold-eps", type=int, default=1500,
                         help="ritmo nominal do estágio sustentado (padrão do palco)")
     parser.add_argument("--slice-seconds", type=float, default=60.0)
+    parser.add_argument("--backend-pid", type=int, default=None,
+                        help="PID do uvicorn: grava a memória residente por fatia (hold)")
     args = parser.parse_args()
 
     recusa = conferir_banco(args.base_url)
@@ -300,12 +377,15 @@ def hold(args) -> int:
     status, _ = request(args.base_url, "/api/live/status")
     if status.get("state") in ATIVOS:
         request(args.base_url, "/api/live/stop", {})
+    pid = getattr(args, "backend_pid", None)
+    inicio = {"load_1m": load_1m(), "backend_rss_mb": rss_mb(pid)}
     try:
         result = run_stage(args.base_url, args.hold_eps, args.hold, args.poll_seconds,
-                           slice_seconds=args.slice_seconds)
+                           slice_seconds=args.slice_seconds, backend_pid=pid)
     except KeyboardInterrupt:
         request(args.base_url, "/api/live/stop", {})
         return 1
+    fim = {"load_1m": load_1m(), "backend_rss_mb": rss_mb(pid)}
     summary = {
         "measured_at": datetime.now(timezone.utc).isoformat(),
         "base_url": args.base_url,
@@ -313,6 +393,8 @@ def hold(args) -> int:
         "hold_seconds": args.hold,
         "slice_seconds": args.slice_seconds,
         "poll_seconds": args.poll_seconds,
+        "host_start": inicio,
+        "host_end": fim,
         "result": result,
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
