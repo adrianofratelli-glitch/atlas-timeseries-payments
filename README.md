@@ -217,9 +217,10 @@ that measurement arrives.
 | ramp knee, 12 s | 4,430/s | 1,210.0 ms | 617.2 ms | write cycle exceeds the one-second pulse |
 
 A 10-minute hold at the stage input (2026-11-13, from a host ~265 ms from the cluster)
-confirmed 863,558 events with no errors and no drift: the sustained share, batch cycle and
-backend memory (~87 MB) stayed flat as the live collection grew. Per-minute numbers, and
-why that host confirmed ~75% of the daytime offer instead of 100%, are in
+confirmed 863,558 events with no errors: the sustained share, batch cycle and backend
+memory (~87 MB) stayed flat as the live collection grew; the concurrent query p95 rose
+1.19× over the run, which one run cannot attribute. Per-minute numbers, and why that host
+confirmed 73–80% of the daytime offer instead of 100%, are in
 [`queries/benchmarks.md`](queries/benchmarks.md).
 
 The default is deliberately below the observed knee. A smooth, sustained proof with

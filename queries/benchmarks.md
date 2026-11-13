@@ -56,11 +56,18 @@ p50 1 088 ms / p95 1 802 ms / max 2 877 ms, concurrent query p50 698 ms / p95 1 
 `insert_many` acknowledged). The final ~55 s were not sliced in this run (fixed since:
 the remainder is now kept as a partial slice, outside the drift).
 
-**No drift.** Minutes 2 → 9: sustained share +3.3 pp, batch p95 0.83×, backend RSS
-slope −0.35 MB/min (92 → 81 MB, `ps` sampled every minute agreed: 86–90 MB, then 70 MB
-after stop). Query p95 1.19× is not a trend: it tracks the offered load (812 ms in the
-trough, 1.2–1.4 s at the peaks). The collection grew to ~0.9 M live events without the
-cycle getting slower. Host load average 4.3 at the start, 6.3 at the end (7.9 peak),
+**No drift on the write side.** Minutes 2 → 9: sustained share +3.3 pp, batch p95
+0.83×, backend RSS slope −0.35 MB/min (92 → 81 MB, `ps` sampled every minute agreed:
+86–90 MB, then 70 MB after stop). The collection grew to ~0.9 M live events without the
+write cycle getting slower.
+
+**The query p95 is inconclusive, not cleared.** Across the daytime slices it rises with
+time — 946, 1 147, 1 229, 1 005, 1 321, 1 237, 1 362 ms (1.19× from minute 2 to 9) —
+and minute 9 has the lowest daytime offer and the highest p95, so offered load does
+not explain it. It may be tied to the live collection growing (the query reads a
+60-second window, but over more buckets and a larger `ts_1` index), or be noise in a
+p95 of ~45 samples per minute. One run cannot separate the two; a longer hold, or
+slices compared at equivalent offer, would. Host load average 4.3 at the start, 6.3 at the end (7.9 peak),
 on a laptop running other work — the client side was not idle.
 
 **Against the documented 2 281/s.** That number was a 60-second stage at simulated
@@ -70,12 +77,14 @@ one-second pulse — so it sustained 100% of the offered load. Today's host sat 
 twice: once for the collection-type check that keeps `insert_many` from creating a plain
 collection (`list_collections` measured at 254 ms p50, identical to `ping` 255 ms), and
 once for the insert itself. The cycle therefore lands at ~1.2 s, above the 1 s pulse,
-and the writer confirms ~75% of the daytime offer: 1 785–2 201/s at an offer of
-2 429–2 957/s. In the trough, where the batch fits the pulse, it confirms 96–97%. This is
+and the writer confirms 73–80% of the daytime offer: 1 595–2 201/s at an offer of
+2 007–2 957/s. In the trough, where the batch fits the pulse, it confirms 96–97%. This is
 the network, not the cluster; the 2026-11-12 attempt at ~310–460 ms confirmed ~1 050/s
-for the same reason. The per-tick check stays: it is a correctness guard (see
-`backend/app/services/live.py`, `_colecao_ok`), and on a presenting host near the cluster
-it costs milliseconds.
+for the same reason. The per-batch type check stays as it is: caching it would be
+incorrect, because a collection dropped or replaced between batches would let
+`insert_many` silently create a plain collection without TTL (see
+`backend/app/services/live.py`, `_colecao_ok`); on a presenting host near the cluster it
+costs milliseconds.
 
 ## Reduced-scale re-measurement — 2026-10-06
 

@@ -27,7 +27,8 @@ back-pressure story, and no sustained-ingest test at production rates. What *is*
 is stability at the stage rate: `tests/live_ingest_capacity.py --hold` runs one long stage
 sliced per minute and reports whether the sustained share, the batch cycle, the query p95
 and the backend memory drift as the collection grows. Measured on 2026-11-13 for 10 minutes
-(863 558 events, no errors, no drift, flat ~87 MB backend) in `queries/benchmarks.md`. Atlas Stream Processing (Kafka source,
+(863 558 events, no errors, no drift in the write cycle, flat ~87 MB backend; the
+concurrent query p95 rose 1.19× and is recorded as inconclusive) in `queries/benchmarks.md`. Atlas Stream Processing (Kafka source,
 windowed `$merge` into a time series) is the managed answer to the back-pressure question
 and is not deployed here. A bank asking
 "can it take our peak PIX second" is asking a question this repository does not answer —
@@ -131,8 +132,8 @@ assumed. On 2026-11-12 the same host measured **~310 ms** (`ping`) and ~460 ms (
 heartbeat RTT); the live writer, which sends one batch per tick, confirmed ~1,050 events/s
 instead of 2,281/s because each batch waited on that round trip. That is the network, not
 the cluster — and it is why the batch card now prints the round trip next to the
-acknowledgement time. The 10-minute hold of 2026-11-13, at ~265 ms, confirmed 1 785–2 201/s
-in the daytime slices (~75% of the offered load; each cycle pays the round trip twice) and
+acknowledgement time. The 10-minute hold of 2026-11-13, at ~265 ms, confirmed 1 595–2 201/s
+in the daytime slices (73–80% of an offer of 2 007–2 957/s; each cycle pays the round trip twice) and
 96–97% in the overnight trough.
 
 **The live ingestion is a demonstration device.** A single background thread inside the

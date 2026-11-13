@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- 10-minute sustained hold measured (2026-11-13): 863 558 events, no errors, no drift; per-minute table in `queries/benchmarks.md`, raw output in `tests/hold-results.json`. The hold now reports offered load and sustained share per slice (the simulated day changes the offer), batch p50, backend memory (`--backend-pid`) and host load, and keeps the final partial slice out of the drift.
+- 10-minute sustained hold measured (2026-11-13): 863 558 events, no errors, no drift in the write cycle (query p95 +1.19×, inconclusive); per-minute table in `queries/benchmarks.md`, raw output in `tests/hold-results.json`. The hold now reports offered load and sustained share per slice (the simulated day changes the offer), batch p50, backend memory (`--backend-pid`) and host load, and keeps the final partial slice out of the drift.
 - `LIMITATIONS.md` states that sharding and Atlas Stream Processing are out of scope by cost.
 
 - Atualiza dependências compatíveis e pisos de segurança; alinha metadados de versão entre aplicação e frontend.
