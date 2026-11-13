@@ -16,12 +16,18 @@ questions, and this demo does not answer them.
 
 ## What is not demonstrated
 
+**Out of scope by cost, not by oversight:** sharding and Atlas Stream Processing. Both
+need paid infrastructure this portfolio does not run (a sharded cluster starts at M30;
+Stream Processing needs its own workspace and a Kafka source). Neither is deployed or
+measured here, and nothing below should be read as a claim about how they behave.
+
 **Ingestion at a bank's real peak.** The generator loads in bulk from one host and the
 measured ceiling on this cluster is in `queries/benchmarks.md`. There is no Kafka, no
 back-pressure story, and no sustained-ingest test at production rates. What *is* measured
 is stability at the stage rate: `tests/live_ingest_capacity.py --hold` runs one long stage
-sliced per minute and reports whether the confirmed rate and the query p95 drift as the
-collection grows (`queries/benchmarks.md`). Atlas Stream Processing (Kafka source,
+sliced per minute and reports whether the sustained share, the batch cycle, the query p95
+and the backend memory drift as the collection grows. Measured on 2026-11-13 for 10 minutes
+(863 558 events, no errors, no drift, flat ~87 MB backend) in `queries/benchmarks.md`. Atlas Stream Processing (Kafka source,
 windowed `$merge` into a time series) is the managed answer to the back-pressure question
 and is not deployed here. A bank asking
 "can it take our peak PIX second" is asking a question this repository does not answer —
@@ -125,7 +131,9 @@ assumed. On 2026-11-12 the same host measured **~310 ms** (`ping`) and ~460 ms (
 heartbeat RTT); the live writer, which sends one batch per tick, confirmed ~1,050 events/s
 instead of 2,281/s because each batch waited on that round trip. That is the network, not
 the cluster — and it is why the batch card now prints the round trip next to the
-acknowledgement time.
+acknowledgement time. The 10-minute hold of 2026-11-13, at ~265 ms, confirmed 1 785–2 201/s
+in the daytime slices (~75% of the offered load; each cycle pays the round trip twice) and
+96–97% in the overnight trough.
 
 **The live ingestion is a demonstration device.** A single background thread inside the
 API writes one mixed batch of PIX, card and TED events per tick from the same synthetic

@@ -152,5 +152,5 @@ Comandos (do README): `python3 -m compileall -q backend tests scripts data-gener
 | `tests/adversarial/test_api_adversarial.py` | Entradas hostis nas rotas |
 | `tests/adversarial/test_ingest_adversarial.py` | Falhas e duplicação na ingestão |
 | `tests/test_resilience.py` | Roteiro de resiliência contra API de teste (script; recusa API que não seja `*_test`) |
-| `tests/stress.py`, `tests/live_ingest_capacity.py` | Estresse e capacidade de ingestão (scripts, cluster real) |
+| `tests/stress.py`, `tests/live_ingest_capacity.py` | Estresse e capacidade de ingestão (scripts, cluster real); `--hold` grava taxa oferecida × confirmada, ciclo, consulta e memória do backend por minuto (saída de 2026-11-13 em `tests/hold-results.json`) |
 | `frontend/tests/http-deadline.test.mjs` | Prazo e erro traduzido de `api.js` |

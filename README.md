@@ -216,6 +216,12 @@ that measurement arrives.
 | upper hold, 60 s | 3,026/s | 1,000.0 ms | 1,129.6 ms | no errors, insufficient stage headroom |
 | ramp knee, 12 s | 4,430/s | 1,210.0 ms | 617.2 ms | write cycle exceeds the one-second pulse |
 
+A 10-minute hold at the stage input (2026-11-13, from a host ~265 ms from the cluster)
+confirmed 863,558 events with no errors and no drift: the sustained share, batch cycle and
+backend memory (~87 MB) stayed flat as the live collection grew. Per-minute numbers, and
+why that host confirmed ~75% of the daytime offer instead of 100%, are in
+[`queries/benchmarks.md`](queries/benchmarks.md).
+
 The default is deliberately below the observed knee. A smooth, sustained proof with
 concurrent queries is more credible than displaying the largest short-lived number.
 
@@ -392,7 +398,8 @@ With the application already running, reproduce the bounded live-capacity ramp:
 # (ALLOW_DEMO_DB_WRITE=1 to measure the demo database on purpose)
 python3 tests/live_ingest_capacity.py --base-url http://127.0.0.1:8400 --duration 12
 # sustained: one 10-minute stage at the stage rate, sliced per minute, with drift verdict
-python3 tests/live_ingest_capacity.py --base-url http://127.0.0.1:8400 --hold 600
+python3 tests/live_ingest_capacity.py --base-url http://127.0.0.1:8400 --hold 600 \
+  --backend-pid "$(lsof -tiTCP:8400 -sTCP:LISTEN)"   # optional: backend memory per minute
 ```
 
 The ramp writes synthetic events to `payment_events_live` and stops automatically when

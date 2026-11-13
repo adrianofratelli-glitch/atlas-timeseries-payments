@@ -1,0 +1,154 @@
+{
+  "measured_at": "2026-11-13T16:50:54.981696+00:00",
+  "base_url": "http://127.0.0.1:18400",
+  "mode": "hold",
+  "hold_seconds": 600.0,
+  "slice_seconds": 60.0,
+  "poll_seconds": 1.0,
+  "host_start": {
+    "load_1m": 4.33,
+    "backend_rss_mb": 73.7
+  },
+  "host_end": {
+    "load_1m": 6.26,
+    "backend_rss_mb": 69.1
+  },
+  "result": {
+    "requested_eps": 1500,
+    "confirmed_eps": 1427.1,
+    "generated_per_tick_mean": 1821.4,
+    "sustainability_pct": 78.4,
+    "written": 863558,
+    "ticks": 499,
+    "tick_ms_p50": 1088.0,
+    "tick_ms_p95": 1802.3,
+    "tick_ms_max": 2877.1,
+    "query_server_ms_p50": 697.6,
+    "query_server_ms_p95": 1186.9,
+    "query_http_ms_p95": 1191.3,
+    "start_http_ms": 3118.3,
+    "stop_http_ms": 673.7,
+    "network_rtt_ms_p50": 265.2,
+    "state": "parado",
+    "errors": [],
+    "slices": [
+      {
+        "seconds": 61.1,
+        "confirmed_eps": 1785.4,
+        "offered_eps": 2429.1,
+        "sustainability_pct": 73.5,
+        "query_server_ms_p95": 946.2,
+        "tick_ms_p50": 1212.5,
+        "tick_ms_p95": 2053.1,
+        "network_rtt_ms_p50": 315.2,
+        "backend_rss_mb": 92.5,
+        "load_1m": 4.66
+      },
+      {
+        "seconds": 60.1,
+        "confirmed_eps": 1946.2,
+        "offered_eps": 2552.5,
+        "sustainability_pct": 76.2,
+        "query_server_ms_p95": 1146.8,
+        "tick_ms_p50": 1192.6,
+        "tick_ms_p95": 1945.0,
+        "network_rtt_ms_p50": 329.2,
+        "backend_rss_mb": 86.4,
+        "load_1m": 7.79
+      },
+      {
+        "seconds": 60.6,
+        "confirmed_eps": 1722.8,
+        "offered_eps": 2286.6,
+        "sustainability_pct": 75.3,
+        "query_server_ms_p95": 1229.3,
+        "tick_ms_p50": 1341.7,
+        "tick_ms_p95": 1808.8,
+        "network_rtt_ms_p50": 288.3,
+        "backend_rss_mb": 87.3,
+        "load_1m": 7.9
+      },
+      {
+        "seconds": 61.4,
+        "confirmed_eps": 615.3,
+        "offered_eps": 632.1,
+        "sustainability_pct": 97.3,
+        "query_server_ms_p95": 897.7,
+        "tick_ms_p50": 819.0,
+        "tick_ms_p95": 1314.7,
+        "network_rtt_ms_p50": 269.6,
+        "backend_rss_mb": 87.5,
+        "load_1m": 4.36
+      },
+      {
+        "seconds": 60.5,
+        "confirmed_eps": 324.0,
+        "offered_eps": 338.6,
+        "sustainability_pct": 95.7,
+        "query_server_ms_p95": 811.8,
+        "tick_ms_p50": 783.8,
+        "tick_ms_p95": 1032.4,
+        "network_rtt_ms_p50": 264.1,
+        "backend_rss_mb": 87.5,
+        "load_1m": 3.05
+      },
+      {
+        "seconds": 61.4,
+        "confirmed_eps": 1683.9,
+        "offered_eps": 2170.2,
+        "sustainability_pct": 77.6,
+        "query_server_ms_p95": 1005.1,
+        "tick_ms_p50": 1285.7,
+        "tick_ms_p95": 1772.7,
+        "network_rtt_ms_p50": 265.4,
+        "backend_rss_mb": 87.8,
+        "load_1m": 3.36
+      },
+      {
+        "seconds": 60.4,
+        "confirmed_eps": 1973.7,
+        "offered_eps": 2714.3,
+        "sustainability_pct": 72.7,
+        "query_server_ms_p95": 1320.6,
+        "tick_ms_p50": 1266.8,
+        "tick_ms_p95": 1979.9,
+        "network_rtt_ms_p50": 263.3,
+        "backend_rss_mb": 87.9,
+        "load_1m": 2.47
+      },
+      {
+        "seconds": 60.4,
+        "confirmed_eps": 2200.7,
+        "offered_eps": 2956.8,
+        "sustainability_pct": 74.4,
+        "query_server_ms_p95": 1236.6,
+        "tick_ms_p50": 1206.0,
+        "tick_ms_p95": 1717.0,
+        "network_rtt_ms_p50": 261.7,
+        "backend_rss_mb": 88.2,
+        "load_1m": 2.87
+      },
+      {
+        "seconds": 60.1,
+        "confirmed_eps": 1595.3,
+        "offered_eps": 2006.8,
+        "sustainability_pct": 79.5,
+        "query_server_ms_p95": 1361.9,
+        "tick_ms_p50": 1134.7,
+        "tick_ms_p95": 1621.3,
+        "network_rtt_ms_p50": 261.8,
+        "backend_rss_mb": 81.3,
+        "load_1m": 3.37
+      }
+    ],
+    "drift": {
+      "slices_compared": 8,
+      "rate_last_over_first": 0.82,
+      "rate_cv_pct": 41.8,
+      "query_p95_last_over_first": 1.19,
+      "sustainability_last_minus_first_pp": 3.3,
+      "tick_p95_last_over_first": 0.83,
+      "rss_slope_mb_per_min": -0.35
+    }
+  }
+}

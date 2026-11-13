@@ -25,12 +25,57 @@ in `$limit: 60`). The 1 h ratio is within noise (fastest classic run 649 ms vs S
 655 ms, with a 310 ms network floor in every sample); 24 h is the clear case. Decision and
 caveats in `docs/adr/0003-block-processing.md`.
 
-## Sustained hold at the stage rate — pending
+## Sustained hold at the stage rate — 2026-11-13
 
-`tests/live_ingest_capacity.py --hold 600` (one 10-minute stage sliced per minute, with
-rate and query-p95 drift) exists but has **not been run to completion yet**: a first
-attempt on 2026-11-12 was interrupted after ~30 s. No sustained numbers are claimed until
-it runs; when it does, record the network RTT it reports beside the rates.
+`tests/live_ingest_capacity.py --hold 600 --backend-pid <uvicorn>` against a backend on its
+own port pointed at `trilho_pagamentos_test` (2.53 M historical events), shared M20,
+MongoDB 9.0.7. One 10-minute stage at the stage input (`LIVE_TARGET_EPS=1500`), the UI
+query cadence, sliced per minute. Raw output: `../tests/hold-results.json`.
+
+**Read the offered column first.** The feed advances its simulated clock 5 minutes per
+tick, so 10 real minutes walk through ~40 simulated hours: daytime peak, the overnight
+trough (slices 4–5) and the next morning. The confirmed rate follows that curve; the
+degradation signals are the sustained share (confirmed ÷ offered), the batch cycle and
+the backend memory, not the raw rate.
+
+| Min | Offered/s | Confirmed/s | Sustained | Batch p50 | Batch p95 | Query p95 | RTT p50 | Backend RSS |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 2 429 | 1 785 | 73.5% | 1 213 ms | 2 053 ms | 946 ms | 315 ms | 92.5 MB |
+| 2 | 2 553 | 1 946 | 76.2% | 1 193 ms | 1 945 ms | 1 147 ms | 329 ms | 86.4 MB |
+| 3 | 2 287 | 1 723 | 75.3% | 1 342 ms | 1 809 ms | 1 229 ms | 288 ms | 87.3 MB |
+| 4 | 632 | 615 | 97.3% | 819 ms | 1 315 ms | 898 ms | 270 ms | 87.5 MB |
+| 5 | 339 | 324 | 95.7% | 784 ms | 1 032 ms | 812 ms | 264 ms | 87.5 MB |
+| 6 | 2 170 | 1 684 | 77.6% | 1 286 ms | 1 773 ms | 1 005 ms | 265 ms | 87.8 MB |
+| 7 | 2 714 | 1 974 | 72.7% | 1 267 ms | 1 980 ms | 1 321 ms | 263 ms | 87.9 MB |
+| 8 | 2 957 | 2 201 | 74.4% | 1 206 ms | 1 717 ms | 1 237 ms | 262 ms | 88.2 MB |
+| 9 | 2 007 | 1 595 | 79.5% | 1 135 ms | 1 621 ms | 1 362 ms | 262 ms | 81.3 MB |
+
+Whole stage: **863 558 events confirmed, 1 427/s mean, 0 errors**, 499 batches, batch
+p50 1 088 ms / p95 1 802 ms / max 2 877 ms, concurrent query p50 698 ms / p95 1 187 ms.
+"Batch" is the writer's full cycle (generate the batch, check the collection type,
+`insert_many` acknowledged). The final ~55 s were not sliced in this run (fixed since:
+the remainder is now kept as a partial slice, outside the drift).
+
+**No drift.** Minutes 2 → 9: sustained share +3.3 pp, batch p95 0.83×, backend RSS
+slope −0.35 MB/min (92 → 81 MB, `ps` sampled every minute agreed: 86–90 MB, then 70 MB
+after stop). Query p95 1.19× is not a trend: it tracks the offered load (812 ms in the
+trough, 1.2–1.4 s at the peaks). The collection grew to ~0.9 M live events without the
+cycle getting slower. Host load average 4.3 at the start, 6.3 at the end (7.9 peak),
+on a laptop running other work — the client side was not idle.
+
+**Against the documented 2 281/s.** That number was a 60-second stage at simulated
+10:00 from a host 17 ms from the cluster, with the batch p95 (821 ms) under the
+one-second pulse — so it sustained 100% of the offered load. Today's host sat at
+**~265 ms driver RTT** (15× the September floor). Each cycle pays that round trip at least
+twice: once for the collection-type check that keeps `insert_many` from creating a plain
+collection (`list_collections` measured at 254 ms p50, identical to `ping` 255 ms), and
+once for the insert itself. The cycle therefore lands at ~1.2 s, above the 1 s pulse,
+and the writer confirms ~75% of the daytime offer: 1 785–2 201/s at an offer of
+2 429–2 957/s. In the trough, where the batch fits the pulse, it confirms 96–97%. This is
+the network, not the cluster; the 2026-11-12 attempt at ~310–460 ms confirmed ~1 050/s
+for the same reason. The per-tick check stays: it is a correctness guard (see
+`backend/app/services/live.py`, `_colecao_ok`), and on a presenting host near the cluster
+it costs milliseconds.
 
 ## Reduced-scale re-measurement — 2026-10-06
 
